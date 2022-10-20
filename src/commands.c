@@ -16,6 +16,10 @@ const static fat_shell_cmd_t command_arr[] = {
 };
 
 
+void color_print(ansi_color_t color){
+    printf("\u001b[%im",color);
+}
+
 cmd_err_code_t cmd_cd(void *arg){
     char *path = (char *)arg;
     if(!path) return CMD_PATH_404;

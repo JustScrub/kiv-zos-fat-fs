@@ -1,6 +1,8 @@
 #ifndef KIV_ZOS_FAT_FS_CMDS
 #define KIV_ZOS_FAT_FS_CMDS
 
+#include "fat_manager.h"
+
 /**
  * @brief Enumeration of possible error codes
  */
@@ -20,6 +22,21 @@ typedef struct {
     char *id;
     cmd_err_code_t (*callback)(void *args);
 } fat_shell_cmd_t;
+
+
+typedef enum
+{
+    ANSI_RST = 0,
+    ANSI_RED = 31,
+    ANSI_GREEN,
+    ANSI_YELLOW,
+    ANSI_BLUE,
+    ANSI_MAGENTA,
+    ANSI_CYAN,
+    ANSI_WHITE
+} ansi_color_t;
+
+void color_print(ansi_color_t color);
 
 /**
  * @brief Copy files. 
