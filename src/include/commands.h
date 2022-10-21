@@ -37,6 +37,7 @@ typedef enum
 } ansi_color_t;
 
 void color_print(ansi_color_t color);
+void set_fat_info(fat_info_t *the_fat);
 
 /**
  * @brief Copy files. 

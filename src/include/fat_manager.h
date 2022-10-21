@@ -2,13 +2,14 @@
 #define KIV_ZOS_FAT_FS_MANAGER
 #include <stdio.h>
 
+#define PWD_MAX_LEN 256
 
 typedef struct
 {
     int block_len;
     int data_blocks;
     char *base_path;
-    char *pwd;
+    char pwd[PWD_MAX_LEN];
     int FAT[];
 } fat_info_t;
 
