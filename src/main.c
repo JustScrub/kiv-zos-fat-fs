@@ -48,7 +48,7 @@ void main(int argc, char *argv[])
     fat_info_t fat_info = {0};
     sprintf(fat_info.pwd,"/%s",argv[1]);
 
-    FILE *the_fs = fopen(argv[1], "rb+");
+    FILE *the_fs = fopen(argv[1], "wb+");
 
     switch (fat_load_info(the_fs, &fat_info))
     {

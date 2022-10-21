@@ -1,4 +1,4 @@
-SRCS = commands.c fat_manager.c main.c
+SRCS = src/*.c
 OUT  = MladyFatFS
 CC   = gcc
 
