@@ -92,8 +92,9 @@ cmd_err_code_t cmd_load(void *args)
     {
         bzero(bfr,256);
         err = load_cmd(batchf,bfr,256);
-        if(err) return err;
+        if(err) break;
     }
+    fclose(batchf);
     return err;
 }
 
