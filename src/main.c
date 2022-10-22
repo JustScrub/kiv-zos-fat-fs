@@ -2,12 +2,22 @@
 #include "include/fat_manager.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <signal.h>
 #include <string.h>
 
 //#define DEBUG
 
-
 char bfr[256] = {0};
+FILE *the_fs = NULL;
+
+void sigint_handler(int signum)
+{
+    color_print(ANSI_RED);
+    printf("\nSingal SIGINT caught. Exitting...\n");
+    color_print(ANSI_RST);
+    if(the_fs) fclose(the_fs);
+    exit(130); // 130 = SIGINT
+}
 
 
 void main(int argc, char *argv[])
@@ -18,10 +28,11 @@ void main(int argc, char *argv[])
         exit(1);
     }
 
-    fat_info_t fat_info = {0};
-    sprintf(fat_info.pwd,"/%s",argv[1]);
+    signal(SIGINT, sigint_handler);
 
-    FILE *the_fs = fopen(argv[1], "wb+");
+    fat_info_t fat_info = {0};
+
+    the_fs = fopen(argv[1], "wb+");
 
     switch (fat_load_info(the_fs, &fat_info))
     {
@@ -43,8 +54,8 @@ void main(int argc, char *argv[])
 
     for(;;)
     {
-        printf("\n");
         color_print(ANSI_GREEN);
+        printf("\n%s", argv[1]);
         cmd_pwd(NULL);
         color_print(ANSI_BLUE);
         fputs(" $: \n", stdout);
