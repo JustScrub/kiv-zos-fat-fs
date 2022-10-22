@@ -3,6 +3,12 @@
 
 #include "fat_manager.h"
 
+#ifdef DEBUG
+#define printD(format, ...) printf("DEBUG: " format "\n", __VA_ARGS__)
+#else
+#define printD(...) ;
+#endif
+
 /**
  * @brief Enumeration of possible error codes
  */
@@ -23,6 +29,7 @@ typedef struct {
     cmd_err_code_t (*callback)(void *args);
 } fat_shell_cmd_t;
 
+typedef int cluster_idx_t;
 
 typedef enum
 {
@@ -38,6 +45,21 @@ typedef enum
 
 void color_print(ansi_color_t color);
 void set_fat_info(fat_info_t *the_fat);
+/**
+ * @brief Prints the error message for the given error code
+ * @param err 
+ */
+void pcmderr(cmd_err_code_t err);
+
+/**
+ * @brief Loads and executes command from the specified file. Prints error if one occurs.
+ * 
+ * @param from The file from which to read the command. Typically, this is \c stdin .
+ * @param bfr (optional) the buffer to use inside this function. Use when calling this function multiple times not to allocate memory for each call. If NULL, the function allocates the buffer itself.
+ * @param bfr_len (optional) length of the buffer. If \c bfr is NULL, this parameter is ignored.
+ * @return cmd_err_code_t 
+ */
+cmd_err_code_t load_cmd(FILE *from, char *bfr, int bfr_len);
 
 /**
  * @brief Copy files. 
@@ -271,6 +293,14 @@ cmd_err_code_t cmd_format(void *args);
 cmd_err_code_t cmd_defrag(void *args);
 
 /**
+ * @brief Clear the console 
+ * 
+ * @param args unused
+ * @return CMD_OK
+ */
+cmd_err_code_t cmd_clear(void *args);
+
+/**
  * @brief Executes the specified command with the specified arguments
  * 
  * @param cmd_id the identification string of the command
@@ -278,4 +308,5 @@ cmd_err_code_t cmd_defrag(void *args);
  * @return cmd_err_code_t - whatever the command returns or CMD_UNKNOWN
  */
 cmd_err_code_t cmd_exec(char *cmd_id, void *args);
+
 #endif

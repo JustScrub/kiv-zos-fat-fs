@@ -6,36 +6,9 @@
 
 //#define DEBUG
 
-#ifdef DEBUG
-#define printD(format, ...) printf("DEBUG: " format "\n", __VA_ARGS__)
-#else
-#define printD(...) ;
-#endif
 
 char bfr[256] = {0};
 
-cmd_err_code_t load_cmd(FILE *from)
-{
-    char *args[2] = {0};
-    char *cmd;
-    void *vargs;
-
-    bzero(bfr, 256);
-    fgets(bfr, 255, from);
-    bfr[strcspn(bfr, "\r\n")] = 0; // delete newline character
-    printD("bfr=%s", bfr);
-
-    if(!(cmd = strtok(bfr, " "))) return CMD_UNKNOWN; // no command -> continue
-    args[0] = strtok(NULL, " "); // first argument, can be string or NULL
-    args[1] = strtok(NULL, " "); // second argument, can be string or NULL
-    printD("cmd=%s, arg1=%s, arg2=%s", cmd, args[0]?args[0]:"NULL",args[1]?args[1]:"NULL");
-
-    if(!args[0]) vargs = NULL;                  //first arg not specified -> no args -> pass NULL
-    else if(!args[1]) vargs = (void *)args[0];  //first arg OK, second missing -> pass first only
-    else vargs = (void *)args;                  //both args specified -> pass arg array
-
-    return cmd_exec(cmd, vargs);
-}
 
 void main(int argc, char *argv[])
 {
@@ -70,12 +43,14 @@ void main(int argc, char *argv[])
 
     for(;;)
     {
+        printf("\n");
         color_print(ANSI_GREEN);
         cmd_pwd(NULL);
         color_print(ANSI_BLUE);
         fputs(" $: \n", stdout);
         color_print(ANSI_RST);
 
-        err = load_cmd(stdin);
+        bzero(bfr, 256);
+        err = load_cmd(stdin,bfr,256);
     }
 }
