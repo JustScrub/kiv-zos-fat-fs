@@ -292,7 +292,19 @@ cmd_err_code_t cmd_defrag(void *args);
  */
 cmd_err_code_t cmd_clear(void *args);
 
+/**
+ * @brief Prints the "last write" time - the last time incp command was invoked
+ * 
+ * @param null 
+ * @return cmd_err_code_t 
+ */
 cmd_err_code_t cmd_lw(char *null);
+/**
+ * @brief Prints the "last read" time - the last time outcp command was invoked
+ * 
+ * @param null 
+ * @return cmd_err_code_t 
+ */
 cmd_err_code_t cmd_lr(char *null);
 
 /**

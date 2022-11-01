@@ -115,3 +115,6 @@ fat_manag_err_code_t fat_info_create(fat_info_t *info, unsigned long size)
     *info = fat_file;
     return FAT_OK;
 }
+
+
+

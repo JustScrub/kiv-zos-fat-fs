@@ -45,6 +45,8 @@ const static fat_shell_cmd_t command_arr[] = {
 
 
 fat_info_t fat_file;
+fat_dir_t  curr_dir,  //cache the cwd and the root directory
+           root_dir;
 
 void set_fat_info(fat_info_t *the_fat)
 {

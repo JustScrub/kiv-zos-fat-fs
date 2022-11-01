@@ -41,8 +41,7 @@ typedef unsigned dblock_idx_t;
     max size:           MaxS = MB*BS                    bytes
 */
 
-/*
-    METADATA
+/* METADATA
     magic sequence: MLADY_FS
     BS
     DB
@@ -52,7 +51,7 @@ typedef unsigned dblock_idx_t;
         last open
         last modify
 
-    size: 44
+    size: 40
      - sum of: {
           strlen("MLADY_FS"),        // magic seq
           sizeof(int),               // BS
@@ -65,8 +64,9 @@ typedef unsigned dblock_idx_t;
 
     The FAT table follows immediately!
 */
+
 #define METADATA_SIZE 40
-#define DIR_NAME_SIZE 12
+#define FILENAME_SIZE 12
 
 typedef struct
 {
@@ -89,8 +89,21 @@ typedef enum
     FAT_OK = 0,
     FAT_BAD_FORMAT,
     FAT_FILE_404,
+    FAT_PATH_404,
     FAT_ERR_CRITICAL    /**< critical error, must reformat the FS. Some data might be possible to retrieve */
 } fat_manag_err_code_t;
+
+#define FTYPE_FILE 0x00
+#define FTYPE_DIR  0xFF
+typedef struct
+{
+    char *path;                             /**< Path to the directory*/
+    int fnum;                               /**< Number of files in the directory */
+    char *(fnames[FILENAME_SIZE]);          /**< Vector of file names */
+    int *fsizes;                            /**< Vector of file sizes*/
+    dblock_idx_t *fstarts;                  /**< Vector of file starting blocks */
+    char *ftypes;                           /**< Vector of file types*/
+} fat_dir_t;
 
 /**
  * @brief Loads information about the filesystem
@@ -104,16 +117,34 @@ typedef enum
  */
 fat_manag_err_code_t fat_load_info(char *fat_file, fat_info_t *info);
 
+/**
+ * @brief Writes the info contained in the \c info parameter to the first section of the FS file (overwrites the metadata and FAT table)
+ * 
+ * @param info 
+ * @return fat_manag_err_code_t 
+ *  - FAT_OK: Success
+ *  - FAT_FILE_404: The file name of the FS file is incorrect; the FS file does not exist on the disc
+ *  - FAT_ERR_CRITICAL: the number of bytes written is not the same as the metadata + FAT size in the \c info structure; metadata inconsistence
+ */
 fat_manag_err_code_t fat_write_info(fat_info_t *info);
 
+/**
+ * @brief Fills the fields of the \c info structure so that it conforms invoking the format size command
+ * 
+ * Does not fill the fs_file field of \c info since it must be known and must remain unchaged througout one run.
+ * 
+ * @param info 
+ * @param size size to format to, in bytes
+ * @return fat_manag_err_code_t 
+ *  - FAT_OK: Success
+ */
 fat_manag_err_code_t fat_info_create(fat_info_t *info, unsigned long size);
 
-/**
- * @brief Move the FS file pointer to the begginig of the specified data block
- * 
- * @param dblock_num The data block to go to
- * @return fat_manag_err_code_t 
- */
-fat_manag_err_code_t fat_goto_cluster(fat_info_t *fat, dblock_idx_t dblock_num);
+
+fat_manag_err_code_t fat_goto_cluster(fat_info_t *info, FILE *fs, dblock_idx_t dblock_num);
+
+fat_manag_err_code_t fat_goto_dir(fat_info_t *info, FILE *fs, char *path);
+
+fat_manag_err_code_t fat_load_dir_info(fat_dir_t *dir, char *path);
 
 #endif
