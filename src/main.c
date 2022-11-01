@@ -30,7 +30,9 @@ void main(int argc, char *argv[])
 
     signal(SIGINT, sigint_handler);
 
-    fat_info_t fat_info = {0};
+    fat_info_t fat_info = {
+        .fs_file = argv[1]
+    };
 
     the_fs = fopen(argv[1], "wb+");
 
@@ -40,11 +42,7 @@ void main(int argc, char *argv[])
         fputs("Warning: The input file is not formatted properly (newly created or corrupted)"
               "Please, use the format command.\n", stdout);
         break;
-    
-    case FAT_TABLE_DISAG:
-        fat_restore_table_disag(&fat_info);
-        break;
-
+        
     default:
         break;
     }

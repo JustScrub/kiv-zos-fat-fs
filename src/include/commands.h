@@ -20,6 +20,7 @@ typedef enum {
     CMD_NOT_EMPTY,              /**< Not empty (e.g. directory) */
     CMD_CANNOT_CREATE_FILE,     /**< Cannot create (format to specified size) the FS file */
     CMD_NO_MEM,                 /**< No free memory in the file system */
+    CMD_INV_ARG,                /**< Invalid argument */
 
     CMD_UNKNOWN                 /**< Unknown command */
 } cmd_err_code_t;
@@ -28,8 +29,6 @@ typedef struct {
     char *id;
     cmd_err_code_t (*callback)(void *args);
 } fat_shell_cmd_t;
-
-typedef int cluster_idx_t;
 
 typedef enum
 {
@@ -175,9 +174,7 @@ cmd_err_code_t cmd_cat(void *args);
  * @brief Changes current working directory
  * 
  * Example: cd a1
- * 
- * On success, writes OK
- * 
+ *  * 
  * @param args char *, the path and name of the directory (can end with '/')
  * @return cmd_err_code_t:
  *  - CMD_OK: success
