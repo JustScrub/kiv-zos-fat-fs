@@ -21,6 +21,10 @@ const static fat_shell_cmd_t command_arr[] = {
         .callback = cmd_load
     },
     {
+        .id = "format",
+        .callback = cmd_format
+    },
+    {
         .id = "clear",
         .callback = cmd_clear
     },
