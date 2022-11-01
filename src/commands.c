@@ -28,6 +28,14 @@ const static fat_shell_cmd_t command_arr[] = {
         .id = "clear",
         .callback = cmd_clear
     },
+    {
+        .id = "lr",
+        .callback = cmd_lr
+    },
+    {
+        .id = "lw",
+        .callback = cmd_lw
+    },
 
     {
         .id = NULL,
@@ -109,6 +117,76 @@ cmd_err_code_t cmd_clear(void* args)
     return CMD_OK;
 }
 
+cmd_err_code_t cmd_format(void *args)
+{
+    char *arg = ((char **)args)[0];
+    char *units, *valid_units[] = {"", "B", "KB", "MB", "GB"};
+    unsigned long size;
+
+    size = strtoul(arg, &units, 10);
+    printD("size=%lu,units=%s", size,units);
+    if(size <=0 )
+    {
+        return CMD_INV_ARG;
+    }
+
+    int i;
+    for(i=0; i<4 && strcmp(units, valid_units[i]);i++) ;
+    if(i > 4) return CMD_INV_ARG;
+    if(units[0]) size <<= (10*(i-1));
+    printD("demanded size: %d B", size);
+
+    // fill the structure with new metadata
+    fat_info_create(&fat_file, size);
+    printD("actual size: %d B", fat_file.data_blocks*BLOCK_SIZE);
+    printD("BS=%d,DB=%d,FS=%d,OFF=0x%X", fat_file.block_size,fat_file.data_blocks,fat_file.fat_size,fat_file.first_block_offset);
+
+    // trim the file to 0 or create it
+    FILE *fs = fopen(fat_file.fs_file, "wb");
+    close(fs);
+
+    // write the info
+    switch (fat_write_info(&fat_file)){
+        case FAT_FILE_404: return CMD_FILE_404;
+        case FAT_ERR_CRITICAL: return CMD_CANNOT_CREATE_FILE;
+    }
+
+    // pad the rest of the FS with zeros (only data blocks are remaining now)
+    fs = fopen(fat_file.fs_file, "ab");
+    for(int i = 0; i < fat_file.data_blocks * BLOCK_SIZE; i++)
+    {
+        fputc(0, fs);
+    }
+    printD("datablocks write ftell=0x%lX", ftell(fs));
+    printD("FS size: %ld",fat_file.first_block_offset + fat_file.data_blocks*BLOCK_SIZE);
+
+    return CMD_OK;
+}
+
+
+cmd_err_code_t cmd_lw(char *null)
+{
+    time_t t = fat_file.last_write;
+    struct tm *tm = localtime(&t);
+    char s[64];
+    size_t ret = strftime(s, sizeof(s), "%c", tm);
+    printf("%s\n", s);
+    return CMD_OK;
+}
+cmd_err_code_t cmd_lr(char *null)
+{
+    time_t t = fat_file.last_read;
+    struct tm *tm = localtime(&t);
+    char s[64];
+    size_t ret = strftime(s, sizeof(s), "%c", tm);
+    printf("%s\n", s);
+    return CMD_OK;
+}
+
+
+
+
+// utility functions
 cmd_err_code_t cmd_exec(char *cmd_id, void *args){
     for(size_t i=0; command_arr[i].id; i++)
         if(!strcmp(cmd_id, command_arr[i].id))
@@ -117,96 +195,7 @@ cmd_err_code_t cmd_exec(char *cmd_id, void *args){
     return CMD_UNKNOWN;
 }
 
-cmd_err_code_t cmd_format(void *args)
-{
-    char *arg = ((char **)arg)[0];
-    char units[3] = {0}, *valid_units[] = {"", "B", "KB", "MB", "GB"};
-    unsigned long size;
 
-    size = strtoul(arg, &units, 10);
-    if(size <=0 )
-    {
-        return CMD_INV_ARG;
-    }
-
-    int i;
-    for(i=0; i<4 && strcmp(units, valid_units[i]);i++) ;
-    if(i > 3) return CMD_INV_ARG;
-    if(units[0]) size <<= (10*(i-1));
-
-    size -= (size%BLOCK_SIZE); // decrease by any remainder since blocks must be of same size, efectively floor()
-
-    // fill the structure with new metadata
-    fat_file.block_size = BLOCK_SIZE;
-    fat_file.data_blocks = size/BLOCK_SIZE;
-
-    fat_file.fat_size = sizeof(dblock_idx_t)*fat_file.data_blocks;
-    fat_file.fat_blocks = (fat_file.fat_size)/BLOCK_SIZE; // num of data blocks for FAT
-    fat_file.fat_blocks += !!(fat_file.fat_size%BLOCK_SIZE); // to round up any remainder, efectively ceil()
-    /*
-        example: 
-        data_blocks = 3, BLOCK_SIZE = 1024, sizeof(dblock_idx_t) = 4
-        3*4 / 1024 = 0
-        3*4 % 1024 = 12
-        !!12 = 1 (convert to bool)
-        ==> fat_blocks = 0+1 (need one block for fat)
-        --------
-        data_blocks = 1024, BLOCK_SIZE = 1024, sizeof(dblock_idx_t) = 4
-        1024*4 / 1024 = 4
-        1024*4 % 1024 = 0
-        !!0 = 0
-        ==> fat_blocks = 4+0 (need 4 fat blocks)
-    */
-    fat_file.first_block_offset = fat_file.fat_blocks*BLOCK_SIZE + BLOCK_SIZE;
-    fat_file.pwd[0] = 0;
-
-    if(fat_file.FAT) free(fat_file.FAT);
-    fat_file.FAT = malloc(fat_file.fat_size);
-    memset(fat_file.FAT, FAT_FREE, fat_file.fat_size);
-    fat_file.FAT[0] = FAT_EOF; // first block is used by root dir
-
-    size = BLOCK_SIZE;
-    time_t secs = time(NULL);
-    FILE *fs = fopen(fat_file.fs_file, "wb");
-
-    // write metadata
-    void *data_seq[] = {"MLADY_FS", &size, &fat_file.data_blocks, &fat_file.fat_blocks, &fat_file.fat_size, &fat_file.first_block_offset, &secs, &secs};
-    int data_lens[] = {strlen("MLADY_FS"), sizeof(size), sizeof(fat_file.data_blocks), sizeof(fat_file.fat_blocks), sizeof(fat_file.fat_size), sizeof(fat_file.first_block_offset), sizeof(secs), sizeof(secs)};
-    i = 0;
-
-    for(int j=0; j < sizeof(data_seq); j++)
-    {
-        fwrite(data_seq[j], data_lens[j],1,fs);
-        i += data_lens[j];
-    }
-
-    for(;i < BLOCK_SIZE; i++)
-    {
-        fputc(0,fs); // pad metadata with 0s
-    }
-
-    // write FAT table
-    fwrite(fat_file.FAT, sizeof(dblock_idx_t), fat_file.fat_size, fs);
-    for(size = fat_file.fat_size; size<fat_file.fat_blocks*BLOCK_SIZE; size++)
-    {
-        fputc(0,fs); // pad FAT with zeros - valid since we know the length of FAT from metadata
-    }
-
-    // pad the rest of the FS with zeros (only data blocks are remaining now)
-    for(i = 0; i < fat_file.data_blocks * BLOCK_SIZE; i++)
-    {
-        fputc(0, fs);
-    }
-
-    fclose(fs);
-    return CMD_OK;
-}
-
-
-
-
-
-// utility functions
 char *cmd_err_msgs[] = {
     "Success.",
     "File not found.",

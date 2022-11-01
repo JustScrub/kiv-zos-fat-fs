@@ -3,11 +3,6 @@
 
 #include "fat_manager.h"
 
-#ifdef DEBUG
-#define printD(format, ...) printf("DEBUG: " format "\n", __VA_ARGS__)
-#else
-#define printD(...) ;
-#endif
 
 /**
  * @brief Enumeration of possible error codes
@@ -297,6 +292,9 @@ cmd_err_code_t cmd_defrag(void *args);
  */
 cmd_err_code_t cmd_clear(void *args);
 
+cmd_err_code_t cmd_lw(char *null);
+cmd_err_code_t cmd_lr(char *null);
+
 /**
  * @brief Executes the specified command with the specified arguments
  * 
@@ -305,5 +303,6 @@ cmd_err_code_t cmd_clear(void *args);
  * @return cmd_err_code_t - whatever the command returns or CMD_UNKNOWN
  */
 cmd_err_code_t cmd_exec(char *cmd_id, void *args);
+
 
 #endif

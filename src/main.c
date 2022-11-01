@@ -5,17 +5,13 @@
 #include <signal.h>
 #include <string.h>
 
-//#define DEBUG
-
 char bfr[256] = {0};
-FILE *the_fs = NULL;
 
 void sigint_handler(int signum)
 {
     color_print(ANSI_RED);
     printf("\nSingal SIGINT caught. Exitting...\n");
     color_print(ANSI_RST);
-    if(the_fs) fclose(the_fs);
     exit(130); // 130 = SIGINT
 }
 
@@ -34,15 +30,13 @@ void main(int argc, char *argv[])
         .fs_file = argv[1]
     };
 
-    the_fs = fopen(argv[1], "wb+");
-
-    switch (fat_load_info(the_fs, &fat_info))
+    switch (fat_load_info(argv[1], &fat_info))
     {
     case FAT_BAD_FORMAT:
-        fputs("Warning: The input file is not formatted properly (newly created or corrupted)"
+        fputs("Warning: The input file is not formatted properly or does not exist."
               "Please, use the format command.\n", stdout);
         break;
-        
+
     default:
         break;
     }
