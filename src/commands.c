@@ -45,8 +45,8 @@ const static fat_shell_cmd_t command_arr[] = {
 
 
 fat_info_t fat_file;
-fat_dir_t  curr_dir,  //cache the cwd and the root directory
-           root_dir;
+fat_dir_t  *curr_dir,  //cache the cwd and the root directory
+           *root_dir;
 
 void set_fat_info(fat_info_t *the_fat)
 {
@@ -161,6 +161,14 @@ cmd_err_code_t cmd_format(void *args)
     }
     printD("datablocks write ftell=0x%lX", ftell(fs));
     printD("FS size: %ld",fat_file.first_block_offset + fat_file.data_blocks*BLOCK_SIZE);
+
+    // make root dir empty
+    if(fat_mkdir(&fat_file, NULL, NULL) != FAT_OK)
+    {
+        return CMD_CANNOT_CREATE_FILE;
+    }
+
+    curr_dir = root_dir = fat_goto_dir(&fat_file,NULL, "/"); // cache files
 
     return CMD_OK;
 }
