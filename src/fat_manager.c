@@ -189,7 +189,7 @@ fat_manag_err_code_t fat_mkdir(fat_info_t *info, fat_dir_t *root, char *dname)
         fwrite(&fnum, sizeof(unsigned long), 1, c);
         fseek(c, root->fnum*FINFO_SIZE, SEEK_CUR); // jump to the end of the dir data
 
-        strncpy(finfo.name, dname, 11);
+        strncpy(finfo.name, dname, 11); // if stlen(dname)<11, it will be padded with 0s, if >11, it will be trimmed
         finfo.size = DIR_SIZE(2);
         finfo.start = cluster;
         if(fwrite(&finfo,FINFO_SIZE, 1, c) != FINFO_SIZE)
@@ -216,12 +216,8 @@ fat_manag_err_code_t fat_mkdir(fat_info_t *info, fat_dir_t *root, char *dname)
  */
 void consume(char **path, char *bfr)
 {
-    char c;
-    while(c-'/')
-    {
-        *(bfr++) = (c=*((*path)++));
-    }
-    (*path)--; *(--bfr)=0;
+    while((*(bfr++) = *((*path)++))-'/');
+    (*path)--; *(bfr-1)=0;
 }
 
 fat_manag_err_code_t fat_goto_dir(fat_info_t *info, fat_dir_t *root, char *fpath)
@@ -254,6 +250,7 @@ fat_manag_err_code_t fat_goto_dir(fat_info_t *info, fat_dir_t *root, char *fpath
             path++; //consume the '/'
             goto traverse;
         }
+        return FAT_PATH_404; // no file with specified name in root
     }
     //root is now leaf file, froot points after fnum
     fclose(froot);

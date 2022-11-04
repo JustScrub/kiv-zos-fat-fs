@@ -29,6 +29,10 @@ const static fat_shell_cmd_t command_arr[] = {
         .callback = cmd_clear
     },
     {
+        .id = "mkdir",
+        .callback = cmd_mkdir
+    },
+    {
         .id = "lr",
         .callback = cmd_lr
     },
@@ -173,11 +177,53 @@ cmd_err_code_t cmd_format(void *args)
         return CMD_CANNOT_CREATE_FILE;
     }
 
-    curr_dir = root_dir = fat_goto_dir(&fat_file,NULL, "/"); // cache files
+    curr_dir = malloc(sizeof(fat_dir_t));
+    root_dir = malloc(sizeof(fat_dir_t));
+    fat_load_dir_info(&fat_file, curr_dir, 0, NULL);
+    fat_load_dir_info(&fat_file, root_dir, 0, NULL);
 
     return CMD_OK;
 }
 
+cmd_err_code_t cmd_mkdir(void *args)
+{
+    char *newdir_path = ((char **)args)[0];
+    int i = strlen(newdir_path);
+
+    //trim optional ending '/'
+    newdir_path[i-1] = newdir_path[i-1]=='/'? 0 : newdir_path[i-1];
+
+    char *newdir_name = strrchr(newdir_path,'/');
+    *newdir_name = 0; // split into two strings
+    // length of the name does not matter rn. It will be handeled in fat_mkdir
+
+    fat_dir_t *cwd = malloc(sizeof(fat_dir_t));// dir struct for traversing
+    memcpy(cwd, curr_dir, sizeof(fat_dir_t)); 
+    if(!fat_goto_dir(&fat_file, &cwd, newdir_path) == FAT_OK)
+    {
+        free(cwd);
+        return CMD_PATH_404;
+    }
+
+    for(i=0;i<cwd->fnum;i++)
+    {
+        if(!strncmp(newdir_name, cwd->files[i].name,FILENAME_SIZE))
+        {
+            return CMD_EXIST;
+        }
+    }
+
+    i=fat_mkdir(&fat_file,cwd,newdir_name);
+    switch(i)
+    {
+        case FAT_NO_MEM: free(cwd); return CMD_NO_MEM;
+        case FAT_OK: break;
+        default: free(cwd); return CMD_FAT_ERR;
+    }
+
+    free(cwd);
+    return CMD_OK;
+}
 
 cmd_err_code_t cmd_lw(char *null)
 {
@@ -220,6 +266,7 @@ char *cmd_err_msgs[] = {
     "Format failed.",
     "Out of memory.",
     "Invalid argument",
+    "Filesystem error.",
     "Unknown command."
 };
 void pcmderr(cmd_err_code_t err)

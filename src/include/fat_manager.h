@@ -131,6 +131,8 @@ const FINFO_SIZE = sizeof(fat_file_info_t);
     |fat_info_t 1    | x(3*42)
     +----------------+
 */
+const DIR_LEN = (BLOCK_SIZE-sizeof(int))/(FINFO_SIZE); /**< Number of entries per directory */
+#define DIR_SIZE(fnum) fnum*FINFO_SIZE + sizeof(int)
 typedef struct
 {
     dblock_idx_t idx;                       /**< The index of the cluster the directory begins at */
@@ -138,8 +140,7 @@ typedef struct
     char *path;                             /**< Path to the directory*/
     fat_file_info_t files[DIR_LEN];         /**< The first file in the directory (the '.' directory)*/
 } fat_dir_t;
-const DIR_LEN = (BLOCK_SIZE-sizeof(int))/(FINFO_SIZE); /**< Number of entries per directory */
-#define DIR_SIZE(fnum) fnum*FINFO_SIZE + sizeof(int)
+
 
 /**
  * @brief Loads information about the filesystem
@@ -147,9 +148,9 @@ const DIR_LEN = (BLOCK_SIZE-sizeof(int))/(FINFO_SIZE); /**< Number of entries pe
  * @param fat_file The file representing the filesystem
  * @param[out] info The info structure to be filled
  * @return fat_manag_err_code_t 
- *  - FAT_OK: success
- *  - FAT_BAD_FORMAT: the file is not formatted properly.
- *  - FAT_TABLE_DISAG: the 2 FAT tables hold different info.
+ *  - FAT_OK: success \n
+ *  - FAT_BAD_FORMAT: the file is not formatted properly. \n
+ *  - FAT_TABLE_DISAG: the 2 FAT tables hold different info. \n
  */
 fat_manag_err_code_t fat_load_info(char *fat_file, fat_info_t *info);
 
@@ -158,15 +159,15 @@ fat_manag_err_code_t fat_load_info(char *fat_file, fat_info_t *info);
  * 
  * @param info 
  * @return fat_manag_err_code_t 
- *  - FAT_OK: Success
- *  - FAT_FILE_404: The file name of the FS file is incorrect; the FS file does not exist on the disc
- *  - FAT_ERR_CRITICAL: the number of bytes written is not the same as the metadata + FAT size in the \c info structure; metadata inconsistence
+ *  - FAT_OK: Success \n
+ *  - FAT_FILE_404: The file name of the FS file is incorrect; the FS file does not exist on the disc \n
+ *  - FAT_ERR_CRITICAL: the number of bytes written is not the same as the metadata + FAT size in the \c info structure; metadata inconsistence \n
  */
 fat_manag_err_code_t fat_write_info(fat_info_t *info);
 
 /**
  * @brief Fills the fields of the \c info structure so that it conforms invoking the format size command
- * 
+ *  \n
  * Does not fill the fs_file field of \c info since it must be known and must remain unchaged througout one run.
  * 
  * @param info 
@@ -192,10 +193,10 @@ FILE *fat_copen(fat_info_t *info, dblock_idx_t dblock_num, char *mode);
  * @param info 
  * @param fs the FS FILE* opened with \c fat_copen or \c fopen
  * @param block_num the data block to go to
- * @return fat_manag_err_code_t 
- *  - FAT_OK: Success
- *  - FAT_FILE_404: \c fs is NULL
- *  - FAT_FPTR_ERR: could not fseek (error stored in errno)
+ * @return fat_manag_err_code_t  \n
+ *  - FAT_OK: Success \n
+ *  - FAT_FILE_404: \c fs is NULL \n
+ *  - FAT_FPTR_ERR: could not fseek (error stored in errno) \n
  */
 fat_manag_err_code_t fat_cseek(fat_info_t *info, FILE *fs, dblock_idx_t block_num);
 
@@ -206,10 +207,10 @@ fat_manag_err_code_t fat_cseek(fat_info_t *info, FILE *fs, dblock_idx_t block_nu
  * @param root the directory to create the subdir in. If NULL, initializes the root directory (at cluster 0)
  * @param name the name of the subdir. Must be up to 11 characters long.
  * @return fat_manag_err_code_t 
- *  - FAT_OK: Success
- *  - FAT_NO_MEM: no memory in the root directory OR NO FREE BLOCKS (run \c fat_get_free_cluster to check)
- *  - FAT_FPTR_ERR: error opening the FS file
- *  - FAT_ERR_CRITICAL: write function failed
+ *  - FAT_OK: Success \n
+ *  - FAT_NO_MEM: no memory in the root directory OR NO FREE BLOCKS (run \c fat_get_free_cluster to check) \n
+ *  - FAT_FPTR_ERR: error opening the FS file \n
+ *  - FAT_ERR_CRITICAL: write function failed \n
  */
 fat_manag_err_code_t fat_mkdir(fat_info_t *info, fat_dir_t *root, char *name);
 
@@ -219,16 +220,18 @@ fat_manag_err_code_t fat_mkdir(fat_info_t *info, fat_dir_t *root, char *name);
  * Same applies when the \c root pointer is NULL. 
  * 
  * @param info the FAT info
- * @param root the root to which the path is relative to
+ * @param root the root to which the path is relative to. Cannot end with '/'
  * @param path the path
  * @return fat_manag_err_code_t 
+ *  - FAT_OK \n
+ *  - FAT_PATH_404: Path does not exist or one of the parts was a file, not a directory
  */
 fat_manag_err_code_t fat_goto_dir(fat_info_t *info, fat_dir_t *root, char *path);
 
 /**
- * @brief Loads directory info of the directory beggining at cluster index \c dir_idx into the adress specified by \c dir
- * The \c dir_idx is assumed to be an index of a directory by the function, whatever lies in it!!
- * 
+ * @brief Loads directory info of the directory beggining at cluster index \c dir_idx into the adress specified by \c dir \n
+ * The \c dir_idx is assumed to be an index of a directory by the function, whatever lies in it!! \n
+ *  \n
  * Does not set \c dir->path 
  * 
  * @param info the FAT info
@@ -244,9 +247,9 @@ fat_manag_err_code_t fat_load_dir_info(fat_info_t *info, fat_dir_t *dir, dblock_
  * 
  * @param info 
  * @return dblock_idx_t 
- *  - FAT_FREE: info is NULL
- *  - FAT_ERR: no free blocks
- *  - other: index of the free block
+ *  - FAT_FREE: info is NULL \n 
+ *  - FAT_ERR: no free blocks \n
+ *  - other: index of the free block \n
  */
 dblock_idx_t fat_get_free_cluster(fat_info_t *info);
 
