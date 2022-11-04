@@ -18,7 +18,7 @@ void sigint_handler(int signum)
 }
 
 
-void main(int argc, char *argv[])
+int main(int argc, char *argv[])
 {
     if(argc < 2)
     {
@@ -58,4 +58,6 @@ void main(int argc, char *argv[])
         bzero(bfr, 256);
         err = load_cmd(stdin,bfr,256);
     }
+    err--;
+    return 0;
 }

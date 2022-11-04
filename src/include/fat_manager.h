@@ -19,7 +19,7 @@
 #define FAT_EOF  (unsigned)(-2)
 #define FAT_ERR  (unsigned)(-3)
 
-#define CLUSTER_WRITE "ab"
+#define CLUSTER_WRITE "r+b"
 #define CLUSTER_READ  "rb"
 
 #define MAGIC_VAL "MLADY_FS"
@@ -108,15 +108,15 @@ typedef enum
     |      size      |
     +----------------+
 */
-#define FTYPE_FILE 0x00
-#define FTYPE_DIR  0xFF
+#define FTYPE_FILE 0x00U
+#define FTYPE_DIR  0xFFU
 typedef struct file_info{
     char name[FILENAME_SIZE]; /**< file name */
-    char type;                /**< file type*/
+    unsigned char type;       /**< file type*/
     dblock_idx_t start;       /**< file starting block */
     unsigned long size;       /**< file size*/
 } fat_file_info_t;
-const FINFO_SIZE = sizeof(fat_file_info_t);
+#define FINFO_SIZE sizeof(fat_file_info_t)
 
 /* STRUCTURE
     fnum{fat_file_info_t... 31x}
@@ -131,14 +131,14 @@ const FINFO_SIZE = sizeof(fat_file_info_t);
     |fat_info_t 1    | x(3*42)
     +----------------+
 */
-const DIR_LEN = (BLOCK_SIZE-sizeof(int))/(FINFO_SIZE); /**< Number of entries per directory */
+#define DDIR_LEN (BLOCK_SIZE-sizeof(int))/(sizeof(fat_file_info_t)) /**< Number of entries per directory */
 #define DIR_SIZE(fnum) fnum*FINFO_SIZE + sizeof(int)
 typedef struct
 {
     dblock_idx_t idx;                       /**< The index of the cluster the directory begins at */
     int fnum;                               /**< Number of files in the directory. */
     char *path;                             /**< Path to the directory*/
-    fat_file_info_t files[DIR_LEN];         /**< The first file in the directory (the '.' directory)*/
+    fat_file_info_t files[DDIR_LEN];        /**< The first file in the directory (the '.' directory)*/
 } fat_dir_t;
 
 

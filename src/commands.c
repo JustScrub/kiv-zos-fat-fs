@@ -145,7 +145,7 @@ cmd_err_code_t cmd_format(void *args)
     for(i=0; i<4 && strcmp(units, valid_units[i]);i++) ;
     if(i > 4) return CMD_INV_ARG;
     if(units[0]) size <<= (10*(i-1));
-    printD("demanded size: %d B", size);
+    printD("demanded size: %lu B", size);
 
     // fill the structure with new metadata
     fat_info_create(&fat_file, size);
@@ -154,22 +154,24 @@ cmd_err_code_t cmd_format(void *args)
 
     // trim the file to 0 or create it
     FILE *fs = fopen(fat_file.fs_file, "wb");
-    close(fs);
+    fclose(fs);
 
     // write the info
     switch (fat_write_info(&fat_file)){
         case FAT_FILE_404: return CMD_FILE_404;
         case FAT_ERR_CRITICAL: return CMD_CANNOT_CREATE_FILE;
+        default: break;
     }
 
     // pad the rest of the FS with zeros (only data blocks are remaining now)
     fs = fopen(fat_file.fs_file, "ab");
-    for(int i = 0; i < fat_file.data_blocks * BLOCK_SIZE; i++)
+    for(unsigned long i = 0; i < fat_file.data_blocks * BLOCK_SIZE; i++)
     {
         fputc(0, fs);
     }
     printD("datablocks write ftell=0x%lX", ftell(fs));
-    printD("FS size: %ld",fat_file.first_block_offset + fat_file.data_blocks*BLOCK_SIZE);
+    printD("FS size: %ld",fat_file.first_block_offset + (long)fat_file.data_blocks*BLOCK_SIZE);
+    fclose(fs);
 
     // make root dir empty
     if(fat_mkdir(&fat_file, NULL, NULL) != FAT_OK)
@@ -200,7 +202,7 @@ cmd_err_code_t cmd_mkdir(void *args)
 
     fat_dir_t *cwd = malloc(sizeof(fat_dir_t));// dir struct for traversing
     memcpy(cwd, curr_dir, sizeof(fat_dir_t)); 
-    if(!fat_goto_dir(&fat_file, &cwd, newdir_path) == FAT_OK)
+    if(!fat_goto_dir(&fat_file, cwd, newdir_path) == FAT_OK)
     {
         free(cwd);
         return CMD_PATH_404;
@@ -226,21 +228,21 @@ cmd_err_code_t cmd_mkdir(void *args)
     return CMD_OK;
 }
 
-cmd_err_code_t cmd_lw(char *null)
+cmd_err_code_t cmd_lw(void *null)
 {
     time_t t = fat_file.last_write;
     struct tm *tm = localtime(&t);
     char s[64];
-    size_t ret = strftime(s, sizeof(s), "%c", tm);
+    strftime(s, sizeof(s), "%c", tm);
     printf("%s\n", s);
     return CMD_OK;
 }
-cmd_err_code_t cmd_lr(char *null)
+cmd_err_code_t cmd_lr(void *null)
 {
     time_t t = fat_file.last_read;
     struct tm *tm = localtime(&t);
     char s[64];
-    size_t ret = strftime(s, sizeof(s), "%c", tm);
+    strftime(s, sizeof(s), "%c", tm);
     printf("%s\n", s);
     return CMD_OK;
 }

@@ -301,14 +301,14 @@ cmd_err_code_t cmd_clear(void *args);
  * @param null 
  * @return cmd_err_code_t 
  */
-cmd_err_code_t cmd_lw(char *null);
+cmd_err_code_t cmd_lw(void *null);
 /**
  * @brief Prints the "last read" time - the last time outcp command was invoked
  * 
  * @param null 
  * @return cmd_err_code_t 
  */
-cmd_err_code_t cmd_lr(char *null);
+cmd_err_code_t cmd_lr(void *null);
 
 /**
  * @brief Executes the specified command with the specified arguments

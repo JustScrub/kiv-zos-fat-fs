@@ -1,14 +1,16 @@
 #include "include/fat_manager.h"
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 /* TODO: 
 
 */
+const int DIR_LEN = DDIR_LEN; // to calc it only once
 
 fat_manag_err_code_t fat_load_info(char *fat_file, fat_info_t *info)
 {
-    FILE *fs = fopen(fat_file, "rb");
+    FILE *fs = fopen(fat_file, CLUSTER_READ);
     if(!fs)
     {
         return FAT_BAD_FORMAT;
@@ -44,19 +46,19 @@ fat_manag_err_code_t fat_load_info(char *fat_file, fat_info_t *info)
 fat_manag_err_code_t fat_write_info(fat_info_t *info)
 {
     fat_info_t fat_file = *info;
-    FILE *fs = fopen(fat_file.fs_file, "ab");
+    FILE *fs = fopen(fat_file.fs_file, CLUSTER_WRITE);
     if(!fs)
     {
         return FAT_FILE_404;
     }
     fseek(fs, 0, SEEK_SET);
 
-    printD("fs_file=%s",fat_file.fs_file);
+    printD("fs_file=%s,ftell=%ld",fat_file.fs_file, ftell(fs));
 
     // write metadata
     void *data_seq[] = {MAGIC_VAL, &fat_file.block_size, &fat_file.data_blocks, &fat_file.fat_size, &fat_file.first_block_offset, &fat_file.last_read, &fat_file.last_write};
     int data_lens[] = {strlen(MAGIC_VAL), sizeof(int), sizeof(fat_file.data_blocks), sizeof(fat_file.fat_size), sizeof(fat_file.first_block_offset), sizeof(time_t), sizeof(time_t)};
-    int size = 0;
+    unsigned long size = 0;
 
     for(int j=0; j < 7; j++)
     {
@@ -123,13 +125,20 @@ fat_manag_err_code_t fat_info_create(fat_info_t *info, unsigned long size)
 FILE *fat_copen(fat_info_t *info, dblock_idx_t cluster, char *mode)
 {
     FILE *c = fopen(info->fs_file, mode);
+    printD("fat_copen: opening=%s,cluster=%d",info->fs_file,cluster);
     if(c) fseek(c, info->first_block_offset + cluster * info->block_size, SEEK_SET);
+    else{
+        printD("fat_copen: error,c=%p",c);
+        perror("fat_copen");
+        return NULL;
+    }
     return c;
 }
 
 fat_manag_err_code_t fat_cseek(fat_info_t *info, FILE *fs, dblock_idx_t cluster)
 {
     if(!fs) return FAT_FILE_404;
+    printD("fat_cseek: cluster=%d",cluster);
     if(!fseek(fs, info->first_block_offset + cluster * info->block_size, SEEK_SET))
         return FAT_OK;
     return FAT_FPTR_ERR;
@@ -144,7 +153,10 @@ fat_manag_err_code_t fat_mkdir(fat_info_t *info, fat_dir_t *root, char *dname)
 
     fat_file_info_t finfo = {0};
     dblock_idx_t cluster = root? fat_get_free_cluster(info): 0;
+    dblock_idx_t parent = root? root->idx : 0;
     printD("fat_mkdir: free_cluster=%d", cluster);
+    printD("fat_mkdir: parent_cluster=%d", parent);
+
     if(cluster==FAT_ERR) return FAT_NO_MEM;
     info->FAT[cluster] = FAT_EOF; // mark the cluster as used. Also the end of the dir
 
@@ -153,7 +165,7 @@ fat_manag_err_code_t fat_mkdir(fat_info_t *info, fat_dir_t *root, char *dname)
 
     // create the new directory
         int fnum = 2;
-        fwrite(&fnum, sizeof(unsigned long), 1, c);
+        fwrite(&fnum, sizeof(int), 1, c);
 
         // write the "." entry
         finfo.name[0] = '.';
@@ -163,20 +175,21 @@ fat_manag_err_code_t fat_mkdir(fat_info_t *info, fat_dir_t *root, char *dname)
         if(fwrite(&finfo,FINFO_SIZE, 1, c) != FINFO_SIZE)
         {
             fclose(c);
+            perror("fat_mkdir write .");
             return FAT_ERR_CRITICAL;
         }
 
         // write the ".." entry
         finfo.name[1] = '.';
         finfo.size = root? (unsigned long)(DIR_SIZE(root->fnum+1)) : DIR_SIZE(2); // if root dir, '..' points to itself
-        dblock_idx_t parent = root? root->idx : 0;
         finfo.start = parent;
         if(fwrite(&finfo,FINFO_SIZE, 1, c) != FINFO_SIZE)
         {
             fclose(c);
+            perror("fat_mkdir write ..");
             return FAT_ERR_CRITICAL;
         }
-        printD("fat_mkdir: new_dir_ftell=%d",ftell(c));
+        printD("fat_mkdir: new_dir_ftell=%ld",ftell(c));
 
     // add the new dir to the parent dir, if not creating root dir
     if(root)
@@ -188,7 +201,7 @@ fat_manag_err_code_t fat_mkdir(fat_info_t *info, fat_dir_t *root, char *dname)
             return FAT_FPTR_ERR;
         }
         fnum = ++root->fnum; // adding new entry to the dir, increase the number of files
-        fwrite(&fnum, sizeof(unsigned long), 1, c);
+        fwrite(&fnum, sizeof(int), 1, c);
         fseek(c, root->fnum*FINFO_SIZE, SEEK_CUR); // jump to the end of the dir data
 
         strncpy(finfo.name, dname, 11); // if stlen(dname)<11, it will be padded with 0s, if >11, it will be trimmed
@@ -199,7 +212,7 @@ fat_manag_err_code_t fat_mkdir(fat_info_t *info, fat_dir_t *root, char *dname)
             fclose(c);
             return FAT_ERR_CRITICAL;
         }
-        printD("fat_mkdir: root_ftell=%d",ftell(c));
+        printD("fat_mkdir: root_ftell=%ld",ftell(c));
     }
     fclose(c);
 
