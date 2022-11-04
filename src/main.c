@@ -9,6 +9,8 @@ char bfr[256] = {0};
 
 void sigint_handler(int signum)
 {
+    save_fat_info();
+
     color_print(ANSI_RED);
     printf("\nSingal SIGINT caught. Exitting...\n");
     color_print(ANSI_RST);

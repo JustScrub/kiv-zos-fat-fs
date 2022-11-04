@@ -69,7 +69,7 @@ typedef unsigned dblock_idx_t;
 */
 
 #define METADATA_SIZE 40
-#define FILENAME_SIZE 12
+#define FILENAME_SIZE 11
 
 typedef struct
 {
@@ -98,33 +98,48 @@ typedef enum
     FAT_ERR_CRITICAL    /**< critical error, must reformat the FS. Some data might be possible to retrieve */
 } fat_manag_err_code_t;
 
-
+/* optimal packing
+     0 1 2 3 4 5 6 7
+    +----------------+
+    |     name       |
+    +----------------+
+    | name |t| start |
+    +----------------+
+    |      size      |
+    +----------------+
+*/
 #define FTYPE_FILE 0x00
 #define FTYPE_DIR  0xFF
-const FINFO_SIZE = FILENAME_SIZE + sizeof(dblock_idx_t) + sizeof(unsigned long) + sizeof(char);
 typedef struct file_info{
     char name[FILENAME_SIZE]; /**< file name */
-    unsigned long size;       /**< file size*/
-    dblock_idx_t start;       /**< file starting block */
     char type;                /**< file type*/
-    struct dir_info *next;    /**< Next file info*/
+    dblock_idx_t start;       /**< file starting block */
+    unsigned long size;       /**< file size*/
 } fat_file_info_t;
+const FINFO_SIZE = sizeof(fat_file_info_t);
 
 /* STRUCTURE
-    fnum{fname|size|start|type ...}
+    fnum{fat_file_info_t... 31x}
+
+    optimally packed as well ;-)
+     0 1 2 3 4 5 6 7
+    +----------------+
+    | idx   | fnum   |
+    +----------------+
+    |     path       | // path is char ptr, which is 8B
+    +----------------+
+    |fat_info_t 1    | x(3*42)
+    +----------------+
 */
-const DIR_LEN = (BLOCK_SIZE-sizeof(int))/(FINFO_SIZE); /**< Number of entries per directory */
-#define DIR_SIZE(fnum) fnum*FINFO_SIZE + sizeof(int)
 typedef struct
 {
     dblock_idx_t idx;                       /**< The index of the cluster the directory begins at */
-    char *path;                             /**< Path to the directory*/
     int fnum;                               /**< Number of files in the directory. */
-    fat_file_info_t *first                  /**< The first file in the directory (the '.' directory)*/
+    char *path;                             /**< Path to the directory*/
+    fat_file_info_t files[DIR_LEN];         /**< The first file in the directory (the '.' directory)*/
 } fat_dir_t;
-
-
-
+const DIR_LEN = (BLOCK_SIZE-sizeof(int))/(FINFO_SIZE); /**< Number of entries per directory */
+#define DIR_SIZE(fnum) fnum*FINFO_SIZE + sizeof(int)
 
 /**
  * @brief Loads information about the filesystem
@@ -191,32 +206,48 @@ fat_manag_err_code_t fat_cseek(fat_info_t *info, FILE *fs, dblock_idx_t block_nu
  * @param root the directory to create the subdir in. If NULL, initializes the root directory (at cluster 0)
  * @param name the name of the subdir. Must be up to 11 characters long.
  * @return fat_manag_err_code_t 
+ *  - FAT_OK: Success
+ *  - FAT_NO_MEM: no memory in the root directory OR NO FREE BLOCKS (run \c fat_get_free_cluster to check)
+ *  - FAT_FPTR_ERR: error opening the FS file
+ *  - FAT_ERR_CRITICAL: write function failed
  */
 fat_manag_err_code_t fat_mkdir(fat_info_t *info, fat_dir_t *root, char *name);
 
-fat_dir_t *fat_goto_dir(fat_info_t *info, FILE *fs, char *path);
+/**
+ * @brief Resolves the path relative to the \c root directory. If \c path starts with '/',
+ * the path is treated as absolute and the resolution begins at the root directory of the FS.
+ * Same applies when the \c root pointer is NULL. 
+ * 
+ * @param info the FAT info
+ * @param root the root to which the path is relative to
+ * @param path the path
+ * @return fat_manag_err_code_t 
+ */
+fat_manag_err_code_t fat_goto_dir(fat_info_t *info, fat_dir_t *root, char *path);
 
 /**
  * @brief Loads directory info of the directory beggining at cluster index \c dir_idx into the adress specified by \c dir
  * The \c dir_idx is assumed to be an index of a directory by the function, whatever lies in it!!
- * Once the directory info is not needed, it should be unloaded (and memory freed) by calling the \c fat_unload_dir_info function
+ * 
+ * Does not set \c dir->path 
  * 
  * @param info the FAT info
  * @param dir Pointer where to store the dir info
  * @param dir_idx cluster index of the directory which's info to load
+ * @param fs the open stream for the FS. If NULL, the function will open and close it itself. If not null, THIS WILL FSEEK THE PTR TO THE \c dir_idx CLUSTER
  * @return fat_manag_err_code_t 
  */
-fat_manag_err_code_t fat_load_dir_info(fat_info_t *info, fat_dir_t *dir, dblock_idx_t *dir_idx);
+fat_manag_err_code_t fat_load_dir_info(fat_info_t *info, fat_dir_t *dir, dblock_idx_t dir_idx, FILE* fs);
 
 /**
- * @brief Frees the memory allocated in the dir info at address of \c dir
- * The \c dir parameter becomes a dangling pointer after this function!
+ * @brief Obtain one free data block from the FS. This does not remove the FAT_FREE mark!
  * 
- * @param dir 
- * @return fat_manag_err_code_t 
+ * @param info 
+ * @return dblock_idx_t 
+ *  - FAT_FREE: info is NULL
+ *  - FAT_ERR: no free blocks
+ *  - other: index of the free block
  */
-fat_manag_err_code_t fat_unload_dir_info(fat_dir_t *dir);
-
-fat_manag_err_code_t fat_get_free_cluster(fat_info_t *info);
+dblock_idx_t fat_get_free_cluster(fat_info_t *info);
 
 #endif

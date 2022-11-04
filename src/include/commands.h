@@ -39,6 +39,8 @@ typedef enum
 
 void color_print(ansi_color_t color);
 void set_fat_info(fat_info_t *the_fat);
+void save_fat_info();
+
 /**
  * @brief Prints the error message for the given error code
  * @param err 

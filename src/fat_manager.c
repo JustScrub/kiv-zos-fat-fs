@@ -3,10 +3,7 @@
 #include <string.h>
 
 /* TODO: 
-    fat_un/load_dir_info
-    fat_get_free_cluster
 
-    fat_goto_dir
 */
 
 fat_manag_err_code_t fat_load_info(char *fat_file, fat_info_t *info)
@@ -138,16 +135,6 @@ fat_manag_err_code_t fat_cseek(fat_info_t *info, FILE *fs, dblock_idx_t cluster)
     return FAT_FPTR_ERR;
 }
 
-int write_dir_info(char *name, long size, dblock_idx_t start, char type, FILE *cp)
-{
-    int i = 0;
-    i += fwrite(name, 1, 12, cp);
-    i += fwrite(&size, sizeof(size), 1, cp);
-    i += fwrite(&start, sizeof(start), 1, cp);
-    i += fwrite(&type, sizeof(type), 1, cp);
-    return i;
-}
-
 fat_manag_err_code_t fat_mkdir(fat_info_t *info, fat_dir_t *root, char *dname)
 {
     if(root && root->fnum >= DIR_LEN)
@@ -155,36 +142,41 @@ fat_manag_err_code_t fat_mkdir(fat_info_t *info, fat_dir_t *root, char *dname)
         return FAT_NO_MEM;
     }
 
+    fat_file_info_t finfo = {0};
     dblock_idx_t cluster = root? fat_get_free_cluster(info): 0;
+    if(cluster==FAT_ERR) return FAT_NO_MEM;
+    info->FAT[cluster] = FAT_EOF; // mark the cluster as used. Also the end of the dir
+
     FILE *c = fat_copen(info, cluster, CLUSTER_WRITE);
     if(!c) return FAT_FPTR_ERR;
 
-    unsigned long size = 2;
-    if(!root) // write fnum to the root directory
-    {
-        fwrite(&size, sizeof(unsigned long), 1, c);
-    }
+    // create the new directory
+        int fnum = 2;
+        fwrite(&fnum, sizeof(unsigned long), 1, c);
 
-    char name[12] = {0};
-    name[0] = '.';
-    size = DIR_SIZE(2); // will contain only '.' and '..' dirs
-    char type = FTYPE_DIR;
-    if(write_dir_info(name, size, cluster, type, c) != FINFO_SIZE)
-    {
-        fclose(c);
-        return FAT_ERR_CRITICAL;
-    }
+        // write the "." entry
+        finfo.name[0] = '.';
+        finfo.size = DIR_SIZE(2); // will contain only '.' and '..' dirs
+        finfo.type = FTYPE_DIR;
+        finfo.start = cluster;
+        if(fwrite(&finfo,FINFO_SIZE, 1, c) != FINFO_SIZE)
+        {
+            fclose(c);
+            return FAT_ERR_CRITICAL;
+        }
 
-    int i = 0;
-    name[1] = '.';
-    size = root? (unsigned long)(DIR_SIZE(root->fnum)) : DIR_SIZE(2); // if root dir, '..' points to itself
-    dblock_idx_t parent = root? root->idx : 0;
-    if(write_dir_info(name, size, parent, type, c) != FINFO_SIZE)
-    {
-        fclose(c);
-        return FAT_ERR_CRITICAL;
-    }
+        // write the ".." entry
+        finfo.name[1] = '.';
+        finfo.size = root? (unsigned long)(DIR_SIZE(root->fnum+1)) : DIR_SIZE(2); // if root dir, '..' points to itself
+        dblock_idx_t parent = root? root->idx : 0;
+        finfo.start = parent;
+        if(fwrite(&finfo,FINFO_SIZE, 1, c) != FINFO_SIZE)
+        {
+            fclose(c);
+            return FAT_ERR_CRITICAL;
+        }
 
+    // add the new dir to the parent dir, if not creating root dir
     if(root)
     {
         /* write to parent directory */
@@ -193,12 +185,14 @@ fat_manag_err_code_t fat_mkdir(fat_info_t *info, fat_dir_t *root, char *dname)
             fclose(c);
             return FAT_FPTR_ERR;
         }
-        size = ++root->fnum; // new "file" in the root dir
-        fwrite(&size, sizeof(unsigned long), 1, c);
+        fnum = ++root->fnum; // adding new entry to the dir, increase the number of files
+        fwrite(&fnum, sizeof(unsigned long), 1, c);
         fseek(c, root->fnum*FINFO_SIZE, SEEK_CUR); // jump to the end of the dir data
-        strncpy(name, dname, 11);
-        size = DIR_SIZE(2);
-        if(write_dir_info(name, size, cluster, type, c) != FINFO_SIZE)
+
+        strncpy(finfo.name, dname, 11);
+        finfo.size = DIR_SIZE(2);
+        finfo.start = cluster;
+        if(fwrite(&finfo,FINFO_SIZE, 1, c) != FINFO_SIZE)
         {
             fclose(c);
             return FAT_ERR_CRITICAL;
@@ -208,29 +202,81 @@ fat_manag_err_code_t fat_mkdir(fat_info_t *info, fat_dir_t *root, char *dname)
 
     if(root)
     {
-        fat_unload_dir_info(root);
-        fat_load_dir_info(info, root, parent);
+        fat_load_dir_info(info, root, parent,NULL);
     }
 
     return FAT_OK;
 }
 
-int read_dir_info(fat_file_info_t *file, FILE *cp)
+/**
+ * @brief Consume next part of the path (up until the next '/', leaving it there)
+ * 
+ * @param path the path to consume (this will get updated)
+ * @param bfr  the buffer to store the consumed part into (len >= FILENAME_SIZE+1), filled with 0s
+ */
+void consume(char **path, char *bfr)
 {
-    int i = 0;
-    i += fread(file->name, 1, 12, cp);
-    i += fread(&file->size, sizeof(unsigned long), 1, cp);
-    i += fread(&file->start, sizeof(dblock_idx_t), 1, cp);
-    i += fread(&file->type, sizeof(char), 1, cp);
-    return i;
+    char c;
+    while(c-'/')
+    {
+        *(bfr++) = (c=*((*path)++));
+    }
+    (*path)--; *(--bfr)=0;
 }
 
-fat_manag_err_code_t fat_load_dir_info(fat_info_t *info, fat_dir_t *dir, dblock_idx_t *dir_idx)
+fat_manag_err_code_t fat_goto_dir(fat_info_t *info, fat_dir_t *root, char *fpath)
 {
-    FILE *c = fat_copen(info, dir_idx, CLUSTER_READ);
-    unsigned long size = 0;
-    fread(&size, sizeof(unsigned long), 1, c);
+    char *path = fpath; //copy the path ptr to edit it;
+    dblock_idx_t cluster =  (!root || *path == '/')? 0 : root->idx;
+    FILE *froot = fat_copen(info, cluster, CLUSTER_READ);
+    if(*path == '/') path++;
+    char bfr[FILENAME_SIZE+1] = {0};
+    fat_file_info_t explored = {0};
 
+    traverse:
+    fseek(froot, sizeof(int), SEEK_CUR); // skip the fnum 
+    consume(&path, bfr); // updates path
+    if(*path=='/') // still not at the leaf dir
+    {
+        for(int i=0;i<root->fnum;i++)
+        {
+            fread(&explored, FINFO_SIZE, 1, froot);
+            if(strncmp(explored.name, bfr, FILENAME_SIZE))
+            {
+                continue;
+            }
+            if(explored.type != FTYPE_DIR)
+            {
+                return FAT_PATH_404; // the file is not a directory, wrong path
+            }
+            // found next dir to move into, set root to the new dir
+            fat_load_dir_info(info, root, explored.start, froot); // this also fseeks to the start of new root
+            path++; //consume the '/'
+            goto traverse;
+        }
+    }
+    //root is now leaf file, froot points after fnum
+    fclose(froot);
+    return FAT_OK;
 }
 
-fat_manag_err_code_t fat_unload_dir_info(fat_dir_t *dir);
+fat_manag_err_code_t fat_load_dir_info(fat_info_t *info, fat_dir_t *dir, dblock_idx_t dir_idx, FILE* fs)
+{
+    FILE *c = fs? fs : fat_copen(info, dir_idx, CLUSTER_READ);
+    if(fs) fat_cseek(info, c, dir_idx);
+    fread(&dir->fnum, sizeof(int), 1, c);
+    fread(&dir->files, FINFO_SIZE, dir->fnum, c);
+    dir->idx = dir_idx;
+    if(!fs) fclose(c);
+    return FAT_OK;
+}
+
+dblock_idx_t fat_get_free_cluster(fat_info_t *info)
+{
+    if(!info) return FAT_FREE; // the largest number
+    for(dblock_idx_t i=1; i<info->data_blocks; i++)
+    {
+        if(info->FAT[i]==FAT_FREE) return i;
+    }
+    return FAT_ERR; // no free blocks
+}

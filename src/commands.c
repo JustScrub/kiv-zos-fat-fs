@@ -52,6 +52,11 @@ void set_fat_info(fat_info_t *the_fat)
 {
     memcpy(&fat_file, the_fat, sizeof(fat_info_t));
 }
+void save_fat_info()
+{
+    fat_write_info(&fat_file);
+}
+
 
 void color_print(ansi_color_t color){
     printf("\e[%im",color);
