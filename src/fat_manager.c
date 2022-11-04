@@ -144,6 +144,7 @@ fat_manag_err_code_t fat_mkdir(fat_info_t *info, fat_dir_t *root, char *dname)
 
     fat_file_info_t finfo = {0};
     dblock_idx_t cluster = root? fat_get_free_cluster(info): 0;
+    printD("fat_mkdir: free_cluster=%d", cluster);
     if(cluster==FAT_ERR) return FAT_NO_MEM;
     info->FAT[cluster] = FAT_EOF; // mark the cluster as used. Also the end of the dir
 
@@ -175,6 +176,7 @@ fat_manag_err_code_t fat_mkdir(fat_info_t *info, fat_dir_t *root, char *dname)
             fclose(c);
             return FAT_ERR_CRITICAL;
         }
+        printD("fat_mkdir: new_dir_ftell=%d",ftell(c));
 
     // add the new dir to the parent dir, if not creating root dir
     if(root)
@@ -197,6 +199,7 @@ fat_manag_err_code_t fat_mkdir(fat_info_t *info, fat_dir_t *root, char *dname)
             fclose(c);
             return FAT_ERR_CRITICAL;
         }
+        printD("fat_mkdir: root_ftell=%d",ftell(c));
     }
     fclose(c);
 
@@ -224,6 +227,7 @@ fat_manag_err_code_t fat_goto_dir(fat_info_t *info, fat_dir_t *root, char *fpath
 {
     char *path = fpath; //copy the path ptr to edit it;
     dblock_idx_t cluster =  (!root || *path == '/')? 0 : root->idx;
+    printD("goto_dir: cluster=%d",cluster);
     FILE *froot = fat_copen(info, cluster, CLUSTER_READ);
     if(*path == '/') path++;
     char bfr[FILENAME_SIZE+1] = {0};
@@ -232,11 +236,13 @@ fat_manag_err_code_t fat_goto_dir(fat_info_t *info, fat_dir_t *root, char *fpath
     traverse:
     fseek(froot, sizeof(int), SEEK_CUR); // skip the fnum 
     consume(&path, bfr); // updates path
+    printD("goto_dir: next=%s,rest=%s",bfr,path);
     if(*path=='/') // still not at the leaf dir
     {
         for(int i=0;i<root->fnum;i++)
         {
             fread(&explored, FINFO_SIZE, 1, froot);
+            printD("goto_dir: testing=%s",explored.name);
             if(strncmp(explored.name, bfr, FILENAME_SIZE))
             {
                 continue;
@@ -247,6 +253,7 @@ fat_manag_err_code_t fat_goto_dir(fat_info_t *info, fat_dir_t *root, char *fpath
             }
             // found next dir to move into, set root to the new dir
             fat_load_dir_info(info, root, explored.start, froot); // this also fseeks to the start of new root
+            printD("goto_dir: new_root=%s,cluster=%d",explored.name, explored.start);
             path++; //consume the '/'
             goto traverse;
         }
@@ -254,6 +261,7 @@ fat_manag_err_code_t fat_goto_dir(fat_info_t *info, fat_dir_t *root, char *fpath
     }
     //root is now leaf file, froot points after fnum
     fclose(froot);
+    strcpy(root->path, fpath);
     return FAT_OK;
 }
 

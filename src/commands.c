@@ -196,6 +196,7 @@ cmd_err_code_t cmd_mkdir(void *args)
     char *newdir_name = strrchr(newdir_path,'/');
     *newdir_name = 0; // split into two strings
     // length of the name does not matter rn. It will be handeled in fat_mkdir
+    printD("cmd_mkdir: path=%s,dname=%s",newdir_path,newdir_name);
 
     fat_dir_t *cwd = malloc(sizeof(fat_dir_t));// dir struct for traversing
     memcpy(cwd, curr_dir, sizeof(fat_dir_t)); 
