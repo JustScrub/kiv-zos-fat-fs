@@ -390,6 +390,7 @@ cmd_err_code_t load_cmd(FILE *from, char *bfr, int bfr_len)
     fgets(bfr, bfr_len-1, from);
     bfr[strcspn(bfr, "\r\n")] = 0; // delete newline character
     printD("bfr=%s", bfr);
+    if(from != stdin) printf("%s\n",bfr);
 
     if(!(cmd = strtok(bfr, " "))) return CMD_OK; // no command (empty line) -> ignore
     args[0] = strtok(NULL, " "); // first argument, can be string or NULL

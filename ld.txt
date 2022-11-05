@@ -1,0 +1,18 @@
+format 10KB
+mkdir foo
+mkdir bar
+mkdir bar/baz
+mkdir x
+mkdir x/y
+mkdir x/y/z
+cd x
+mkdir a
+mkdir b
+cd /
+
+ls
+ls bar
+ls x
+ls x/y
+
+cd /x/y
