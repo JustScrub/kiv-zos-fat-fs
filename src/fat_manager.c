@@ -5,6 +5,7 @@
 
 /* TODO: 
 
+    cd command - write correct path to fat_info_t
 */
 const int DIR_LEN = DDIR_LEN; // to calc it only once
 
@@ -169,10 +170,9 @@ fat_manag_err_code_t fat_mkdir(fat_info_t *info, fat_dir_t *root, char *dname)
 
         // write the "." entry
         finfo.name[0] = '.';
-        finfo.size = DIR_SIZE(2); // will contain only '.' and '..' dirs
         finfo.type = FTYPE_DIR;
         finfo.start = cluster;
-        if(fwrite(&finfo,FINFO_SIZE, 1, c) != FINFO_SIZE)
+        if(fwrite(&finfo,FINFO_SIZE, 1, c) != 1)
         {
             fclose(c);
             perror("fat_mkdir write .");
@@ -181,9 +181,8 @@ fat_manag_err_code_t fat_mkdir(fat_info_t *info, fat_dir_t *root, char *dname)
 
         // write the ".." entry
         finfo.name[1] = '.';
-        finfo.size = root? (unsigned long)(DIR_SIZE(root->fnum+1)) : DIR_SIZE(2); // if root dir, '..' points to itself
         finfo.start = parent;
-        if(fwrite(&finfo,FINFO_SIZE, 1, c) != FINFO_SIZE)
+        if(fwrite(&finfo,FINFO_SIZE, 1, c) != 1)
         {
             fclose(c);
             perror("fat_mkdir write ..");
@@ -202,12 +201,11 @@ fat_manag_err_code_t fat_mkdir(fat_info_t *info, fat_dir_t *root, char *dname)
         }
         fnum = ++root->fnum; // adding new entry to the dir, increase the number of files
         fwrite(&fnum, sizeof(int), 1, c);
-        fseek(c, root->fnum*FINFO_SIZE, SEEK_CUR); // jump to the end of the dir data
+        fseek(c, (root->fnum-1)*FINFO_SIZE, SEEK_CUR); // jump after the *written* directories. Not behind the one to be written!
 
         strncpy(finfo.name, dname, 11); // if stlen(dname)<11, it will be padded with 0s, if >11, it will be trimmed
-        finfo.size = DIR_SIZE(2);
         finfo.start = cluster;
-        if(fwrite(&finfo,FINFO_SIZE, 1, c) != FINFO_SIZE)
+        if(fwrite(&finfo,FINFO_SIZE, 1, c) != 1)
         {
             fclose(c);
             return FAT_ERR_CRITICAL;
@@ -232,8 +230,8 @@ fat_manag_err_code_t fat_mkdir(fat_info_t *info, fat_dir_t *root, char *dname)
  */
 void consume(char **path, char *bfr)
 {
-    while((*(bfr++) = *((*path)++))-'/');
-    (*path)--; *(bfr-1)=0;
+     while(**path&&**path-'/') 
+    *(bfr++) = *((*path)++);
 }
 
 fat_manag_err_code_t fat_goto_dir(fat_info_t *info, fat_dir_t *root, char *fpath)
@@ -250,7 +248,7 @@ fat_manag_err_code_t fat_goto_dir(fat_info_t *info, fat_dir_t *root, char *fpath
     fseek(froot, sizeof(int), SEEK_CUR); // skip the fnum 
     consume(&path, bfr); // updates path
     printD("goto_dir: next=%s,rest=%s",bfr,path);
-    if(*path=='/') // still not at the leaf dir
+    if(*bfr)
     {
         for(int i=0;i<root->fnum;i++)
         {
@@ -267,14 +265,15 @@ fat_manag_err_code_t fat_goto_dir(fat_info_t *info, fat_dir_t *root, char *fpath
             // found next dir to move into, set root to the new dir
             fat_load_dir_info(info, root, explored.start, froot); // this also fseeks to the start of new root
             printD("goto_dir: new_root=%s,cluster=%d",explored.name, explored.start);
-            path++; //consume the '/'
+            if(*path) path++; //consume the '/'. If path points to null terminator, do nothing (otherwise dangling ptr)
+            else goto end; // no remaining path -> we're there
             goto traverse;
         }
+        fclose(froot);
         return FAT_PATH_404; // no file with specified name in root
     }
-    //root is now leaf file, froot points after fnum
+    end:
     fclose(froot);
-    strcpy(root->path, fpath);
     return FAT_OK;
 }
 

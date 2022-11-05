@@ -17,7 +17,6 @@ void sigint_handler(int signum)
     exit(130); // 130 = SIGINT
 }
 
-
 int main(int argc, char *argv[])
 {
     if(argc < 2)
@@ -28,22 +27,12 @@ int main(int argc, char *argv[])
 
     signal(SIGINT, sigint_handler);
 
-    fat_info_t fat_info = {
-        .fs_file = argv[1]
-    };
-
-    switch (fat_load_info(argv[1], &fat_info))
+    if(set_fat_info(argv[1]))
     {
-    case FAT_BAD_FORMAT:
         fputs("Warning: The input file is not formatted properly or does not exist."
               "Please, use the format command.\n", stdout);
-        break;
-
-    default:
-        break;
     }
 
-    set_fat_info(&fat_info);
     cmd_err_code_t err;
 
     for(;;)

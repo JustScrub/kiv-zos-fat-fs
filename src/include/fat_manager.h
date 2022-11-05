@@ -98,6 +98,22 @@ typedef enum
     FAT_ERR_CRITICAL    /**< critical error, must reformat the FS. Some data might be possible to retrieve */
 } fat_manag_err_code_t;
 
+
+#define FTYPE_FILE 0x00U
+#define FTYPE_DIR  0xFFU
+/**
+ * @brief The structure holding file info.
+ * This struct is directly written to the directory file.
+ * If the type is \c FTYPE_DIR then the size parameter is unused and should not be read. 
+ * Directory size is calculated using the \c DIR_SIZE macro (see below)
+ */
+typedef struct file_info{
+    char name[FILENAME_SIZE]; /**< file name */
+    unsigned char type;       /**< file type*/
+    dblock_idx_t start;       /**< file starting block */
+    unsigned long size;       /**< file size*/
+} fat_file_info_t;
+#define FINFO_SIZE sizeof(fat_file_info_t)
 /* optimal packing
      0 1 2 3 4 5 6 7
     +----------------+
@@ -108,39 +124,29 @@ typedef enum
     |      size      |
     +----------------+
 */
-#define FTYPE_FILE 0x00U
-#define FTYPE_DIR  0xFFU
-typedef struct file_info{
-    char name[FILENAME_SIZE]; /**< file name */
-    unsigned char type;       /**< file type*/
-    dblock_idx_t start;       /**< file starting block */
-    unsigned long size;       /**< file size*/
-} fat_file_info_t;
-#define FINFO_SIZE sizeof(fat_file_info_t)
 
-/* STRUCTURE
-    fnum{fat_file_info_t... 31x}
 
-    optimally packed as well ;-)
-     0 1 2 3 4 5 6 7
-    +----------------+
-    | idx   | fnum   |
-    +----------------+
-    |     path       | // path is char ptr, which is 8B
-    +----------------+
-    |fat_info_t 1    | x(3*42)
-    +----------------+
-*/
 #define DDIR_LEN (BLOCK_SIZE-sizeof(int))/(sizeof(fat_file_info_t)) /**< Number of entries per directory */
 #define DIR_SIZE(fnum) fnum*FINFO_SIZE + sizeof(int)
+/**
+ * @brief cached dir contents
+ * STRUCTURE in FS
+ *   fnum{fat_file_info_t... 31x}
+ */
 typedef struct
 {
     dblock_idx_t idx;                       /**< The index of the cluster the directory begins at */
     int fnum;                               /**< Number of files in the directory. */
-    char *path;                             /**< Path to the directory*/
     fat_file_info_t files[DDIR_LEN];        /**< The first file in the directory (the '.' directory)*/
 } fat_dir_t;
-
+/* optimally packed as well ;-)
+      0 1 2 3 4 5 6 7
+    +----------------+
+    | idx   | fnum   |
+    +----------------+
+    |fat_info_t 1    | x(3*42)
+    +----------------+
+*/
 
 /**
  * @brief Loads information about the filesystem

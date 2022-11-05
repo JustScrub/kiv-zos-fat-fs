@@ -21,8 +21,11 @@ typedef enum {
     CMD_UNKNOWN                 /**< Unknown command */
 } cmd_err_code_t;
 
+#define CMD_MODIFYING 1
+#define CMD_READING   0
 typedef struct {
     char *id;
+    char modifying;
     cmd_err_code_t (*callback)(void *args);
 } fat_shell_cmd_t;
 
@@ -39,7 +42,7 @@ typedef enum
 } ansi_color_t;
 
 void color_print(ansi_color_t color);
-void set_fat_info(fat_info_t *the_fat);
+char set_fat_info(char *fs_file);
 void save_fat_info();
 
 /**
