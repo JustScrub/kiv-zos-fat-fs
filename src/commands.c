@@ -13,6 +13,10 @@ const static fat_shell_cmd_t command_arr[] = {
         .callback = cmd_cd
     },
     {
+        .id = "ls",
+        .callback = cmd_ls
+    },
+    {
         .id = "pwd",
         .callback = cmd_pwd
     },
@@ -51,7 +55,7 @@ const static fat_shell_cmd_t command_arr[] = {
 
 #define trim_slash(path, len) do{path[len-1] = path[len-1] == '/'? 0 : path[len-1]; len--;}while(0)
 
-fat_info_t fat_file;
+fat_info_t fat_file = {0};
 fat_dir_t  *curr_dir = NULL,  //cache the cwd and the root directory
            *root_dir = NULL;
 
@@ -63,6 +67,7 @@ void init_dir_cache()
     root_dir = malloc(sizeof(fat_dir_t));
     fat_load_dir_info(&fat_file, curr_dir, 0, NULL);
     fat_load_dir_info(&fat_file, root_dir, 0, NULL);
+    bzero(fat_file.pwd,PWD_MAX_LEN);
 }
 void update_cache()
 {
@@ -81,6 +86,7 @@ char set_fat_info(char *fat_file_path)
     init_dir_cache();
     return 0;
 }
+
 void save_fat_info()
 {
     fat_write_info(&fat_file);
@@ -91,20 +97,97 @@ void color_print(ansi_color_t color){
     printf("\e[%im",color);
 }
 
+/**
+ * @brief Resolve the path starting from \c cwd . Does not check if those paths exist.
+ * If \c path starts with '/', the rest (starting at \c path+1 ) will be copied to cwd 
+ * @param cwd will get updated. MUST BEGIN WITH '/' OR BE EMPTY, else it does nothing.
+ * @param path 
+ */
+void resolve_path(char *cwd, char *path)
+{
+    printD("resolve_path: cwd=%s,path=%s",cwd,path);
+    if(*path=='/')
+    {
+        strncpy(cwd, path, PWD_MAX_LEN-1);
+        return;
+    }
+    if(*cwd && *cwd-'/') return; // cwd must be empty or begin with '/'
+
+    char bfr[FILENAME_SIZE+1];
+    for(;;)
+    {
+        bzero(bfr, FILENAME_SIZE+1);
+        consume_path_part(&path, bfr);
+        printD("resolve_path: path=%s, bfr=%s", path, bfr);
+        if(!*bfr) break;   // nothing consumed -> end it
+        if(*path) path++;  // can only be null term or '/' -> consume the '/'
+
+        if(!strcmp(bfr,".")) continue; // '.' points to the same file...
+        if(!strcmp(bfr, ".."))
+        {
+            if(*cwd) *strrchr(cwd,'/') = 0; // ".." is parent dir, therefore "delete" the last subdir from the string
+            continue;
+        }
+
+        sprintf(cwd+strlen(cwd), "/%s",bfr); // append whatever path is there
+        printD("resolve_path: new_cwd=%s",cwd);
+    }
+    
+}
+
 cmd_err_code_t cmd_cd(void *arg){
     char *path = ((char **)arg)[0];
     if(!path) return CMD_PATH_404;
     int pwdlen = strlen(fat_file.pwd);
     trim_slash(path,pwdlen);
 
-    fat_goto_dir(&fat_file, curr_dir, path);
-    strcpy(fat_file.pwd+1, curr_dir->path);
+    switch (fat_goto_dir(&fat_file, curr_dir, path))
+    {
+        case FAT_PATH_404: return CMD_PATH_404;
+        default: break;
+    }
+    resolve_path(fat_file.pwd, path);
+    printD("cmd_cd: new_pwd=%s,path=%s",fat_file.pwd, path);
     return CMD_OK;
 }
 
 cmd_err_code_t cmd_pwd(void *args)
 {
     printf(fat_file.pwd);
+    return CMD_OK;
+}
+
+cmd_err_code_t cmd_ls(void *args)
+{
+    char *path = ((char **)args)[0];
+    if(!path)
+    {
+        path = alloca(2);
+        strcpy(path, ".");
+    }
+
+    fat_dir_t *cwd = malloc(sizeof(fat_dir_t));// dir struct for traversing
+    memcpy(cwd, curr_dir, sizeof(fat_dir_t));
+
+    switch (fat_goto_dir(&fat_file,cwd,path))
+    {
+    case FAT_PATH_404: return CMD_PATH_404;
+    default: break;
+    }
+
+    for(int i=0; i<cwd->fnum; i++)
+    {
+        if(cwd->files[i].type == FTYPE_DIR)
+        {
+            color_print(ANSI_YELLOW);
+            printf("%s ",cwd->files[i].name);
+            color_print(ANSI_RST);
+            continue;
+        }
+        printf("%s ",cwd->files[i].name);
+    }
+    printf("\n");
+    free(cwd);
     return CMD_OK;
 }
 

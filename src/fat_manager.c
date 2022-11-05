@@ -222,58 +222,48 @@ fat_manag_err_code_t fat_mkdir(fat_info_t *info, fat_dir_t *root, char *dname)
     return FAT_OK;
 }
 
-/**
- * @brief Consume next part of the path (up until the next '/', leaving it there)
- * 
- * @param path the path to consume (this will get updated)
- * @param bfr  the buffer to store the consumed part into (len >= FILENAME_SIZE+1), filled with 0s
- */
-void consume(char **path, char *bfr)
+void consume_path_part(char **path, char *bfr)
 {
      while(**path&&**path-'/') 
     *(bfr++) = *((*path)++);
 }
 
-fat_manag_err_code_t fat_goto_dir(fat_info_t *info, fat_dir_t *root, char *fpath)
+fat_manag_err_code_t fat_goto_dir(fat_info_t *info, fat_dir_t *root, char *path)
 {
-    char *path = fpath; //copy the path ptr to edit it;
     dblock_idx_t cluster =  (!root || *path == '/')? 0 : root->idx;
     printD("goto_dir: cluster=%d",cluster);
-    FILE *froot = fat_copen(info, cluster, CLUSTER_READ);
     if(*path == '/') path++;
-    char bfr[FILENAME_SIZE+1] = {0};
-    fat_file_info_t explored = {0};
+    char bfr[FILENAME_SIZE+1];
+    fat_file_info_t *explored;
 
     traverse:
-    fseek(froot, sizeof(int), SEEK_CUR); // skip the fnum 
-    consume(&path, bfr); // updates path
+    bzero(bfr, FILENAME_SIZE+1);
+    consume_path_part(&path, bfr); // updates path
     printD("goto_dir: next=%s,rest=%s",bfr,path);
     if(*bfr)
     {
         for(int i=0;i<root->fnum;i++)
         {
-            fread(&explored, FINFO_SIZE, 1, froot);
-            printD("goto_dir: testing=%s",explored.name);
-            if(strncmp(explored.name, bfr, FILENAME_SIZE))
+            explored = &root->files[i];
+            printD("goto_dir: testing=%s",explored->name);
+            if(strncmp(explored->name, bfr, FILENAME_SIZE))
             {
                 continue;
             }
-            if(explored.type != FTYPE_DIR)
+            if(explored->type != FTYPE_DIR)
             {
                 return FAT_PATH_404; // the file is not a directory, wrong path
             }
             // found next dir to move into, set root to the new dir
-            fat_load_dir_info(info, root, explored.start, froot); // this also fseeks to the start of new root
-            printD("goto_dir: new_root=%s,cluster=%d",explored.name, explored.start);
+            fat_load_dir_info(info, root, explored->start, NULL); // this also fseeks to the start of new root
+            printD("goto_dir: new_root=%s/%s,cluster=%d",bfr,explored->name, explored->start);
             if(*path) path++; //consume the '/'. If path points to null terminator, do nothing (otherwise dangling ptr)
             else goto end; // no remaining path -> we're there
             goto traverse;
         }
-        fclose(froot);
         return FAT_PATH_404; // no file with specified name in root
     }
     end:
-    fclose(froot);
     return FAT_OK;
 }
 
@@ -284,6 +274,7 @@ fat_manag_err_code_t fat_load_dir_info(fat_info_t *info, fat_dir_t *dir, dblock_
     fread(&dir->fnum, sizeof(int), 1, c);
     fread(&dir->files, FINFO_SIZE, dir->fnum, c);
     dir->idx = dir_idx;
+    printD("fat_load_dir_info: fnum=%i,idx=%i,ftell=0x%lX",dir->fnum, dir_idx, ftell(c));
     if(!fs) fclose(c);
     return FAT_OK;
 }

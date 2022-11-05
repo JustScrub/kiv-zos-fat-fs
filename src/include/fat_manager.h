@@ -259,4 +259,15 @@ fat_manag_err_code_t fat_load_dir_info(fat_info_t *info, fat_dir_t *dir, dblock_
  */
 dblock_idx_t fat_get_free_cluster(fat_info_t *info);
 
+
+/**
+ * @brief Utility function. Consume next part of the path (up until the next '/', leaving it there) and store into \c bfr .
+ * If \c path does not contain '/', the whole string is copied to \c bfr and path points to the null terminator.
+ * If \c path starts with '/', nothing happens.
+ * If there is nothing left to consume, bfr will remain unchanged and path will point to null terminator.
+ * 
+ * @param path the path to consume (this will get updated)
+ * @param bfr  the buffer to store the consumed part into (len >= FILENAME_SIZE+1), filled with 0s
+ */
+void consume_path_part(char **path, char *bfr);
 #endif
