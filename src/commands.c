@@ -99,7 +99,7 @@ void color_print(ansi_color_t color){
 
 /**
  * @brief Resolve the path starting from \c cwd . Does not check if those paths exist.
- * If \c path starts with '/', the rest (starting at \c path+1 ) will be copied to cwd 
+ * If \c path starts with '/', \c cwd is cleared (since we start at the root directory)
  * @param cwd will get updated. MUST BEGIN WITH '/' OR BE EMPTY, else it does nothing.
  * @param path 
  */
@@ -108,8 +108,8 @@ void resolve_path(char *cwd, char *path)
     printD("resolve_path: cwd=%s,path=%s",cwd,path);
     if(*path=='/')
     {
-        strncpy(cwd, path, PWD_MAX_LEN-1);
-        return;
+        *cwd = 0;
+        path++;
     }
     if(*cwd && *cwd-'/') return; // cwd must be empty or begin with '/'
 

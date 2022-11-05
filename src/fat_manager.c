@@ -230,9 +230,11 @@ void consume_path_part(char **path, char *bfr)
 
 fat_manag_err_code_t fat_goto_dir(fat_info_t *info, fat_dir_t *root, char *path)
 {
-    dblock_idx_t cluster =  (!root || *path == '/')? 0 : root->idx;
-    printD("goto_dir: cluster=%d",cluster);
-    if(*path == '/') path++;
+    printD("goto_dir: cluster=%d",(!root || *path == '/')? 0 : root->idx);
+    if(*path == '/'){
+        path++;
+        fat_load_dir_info(info, root, 0, NULL);
+    }
     char bfr[FILENAME_SIZE+1];
     fat_file_info_t *explored;
 
