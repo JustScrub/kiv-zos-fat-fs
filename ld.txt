@@ -16,3 +16,4 @@ ls x
 ls x/y
 
 cd /x/y
+rmdir z

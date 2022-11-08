@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <time.h>
 
-//#define DEBUG
+#define DEBUG
 
 #ifdef DEBUG
 #define printD(format, ...) printf("DEBUG: " format "\n", __VA_ARGS__)

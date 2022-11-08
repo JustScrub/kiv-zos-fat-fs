@@ -39,6 +39,11 @@ const static fat_shell_cmd_t command_arr[] = {
         .callback = cmd_mkdir
     },
     {
+        .id = "rmdir",
+        .modifying = CMD_MODIFYING,
+        .callback = cmd_rmdir
+    },
+    {
         .id = "lr",
         .callback = cmd_lr
     },
@@ -275,30 +280,42 @@ cmd_err_code_t cmd_format(void *args)
     return CMD_OK;
 }
 
+cmd_err_code_t traverse_to_parent(char *whole_path, char **name, fat_dir_t **cwd)
+{
+    int i = strlen(whole_path);
+
+    //trim optional ending '/'
+    trim_slash(whole_path, i);
+
+    *name = strrchr(whole_path,'/'); // mkdir in cwd -> this returns NULL (there is no path, only dir name)
+    if(*name){
+        **name = 0; // split into two strings
+        (*name)++;
+    }
+    else *name = whole_path;
+    // length of the name does not matter rn. It will be handeled in fat_mkdir
+    printD("traverse_to_parent: path=%s,dname=%s",whole_path,*name);
+
+    *cwd = malloc(sizeof(fat_dir_t));// dir struct for traversing
+    memcpy(*cwd, curr_dir, sizeof(fat_dir_t)); 
+
+    if(*name != whole_path) //there is path and the name
+    if(fat_goto_dir(&fat_file, *cwd, whole_path) != FAT_OK) // -> traverse to that path to make the dir there
+    {
+        free(cwd);
+        return CMD_PATH_404;
+    }
+    return CMD_OK;
+}
+
 cmd_err_code_t cmd_mkdir(void *args)
 {
     char *newdir_path = ((char **)args)[0];
-    int i = strlen(newdir_path);
-
-    //trim optional ending '/'
-    trim_slash(newdir_path, i);
-
-    char *newdir_name = strrchr(newdir_path,'/'); // mkdir in cwd -> this returns NULL (there is no path, only dir name)
-    if(newdir_name){
-        *newdir_name = 0; // split into two strings
-        newdir_name++;
-    }
-    else newdir_name = newdir_path;
-    // length of the name does not matter rn. It will be handeled in fat_mkdir
-    printD("cmd_mkdir: path=%s,dname=%s",newdir_path,newdir_name);
-
-    fat_dir_t *cwd = malloc(sizeof(fat_dir_t));// dir struct for traversing
-    memcpy(cwd, curr_dir, sizeof(fat_dir_t)); 
-
-    if(newdir_name != newdir_path) //there is path and the name
-    if(fat_goto_dir(&fat_file, cwd, newdir_path) != FAT_OK) // -> traverse to that path to make the dir there
+    char *newdir_name = NULL;
+    fat_dir_t *cwd = NULL;
+    int i;
+    if(traverse_to_parent(newdir_path, &newdir_name, &cwd) != CMD_OK)
     {
-        free(cwd);
         return CMD_PATH_404;
     }
 
@@ -311,6 +328,111 @@ cmd_err_code_t cmd_mkdir(void *args)
     }
 
     i=fat_mkdir(&fat_file,cwd,newdir_name);
+    free(cwd);
+    switch (i)
+    {
+    case FAT_NO_MEM:  return CMD_NO_MEM;
+    case FAT_ERR_CRITICAL:
+    case FAT_FPTR_ERR: return CMD_FAT_ERR;
+    //no other error possible
+    default: return CMD_OK;
+    }
+}
+
+cmd_err_code_t cmd_rmdir(void *args)
+{
+    char *rmdir_path = ((char **)args)[0];
+    char *rmdir_name = NULL;
+    fat_dir_t *cwd = NULL;
+    int i;
+    if(traverse_to_parent(rmdir_path, &rmdir_name, &cwd) != CMD_OK)
+    {
+        return CMD_PATH_404;
+    }
+
+    FILE *c = NULL;
+    for(i=0;i<cwd->fnum;i++)
+    {
+        if(!strncmp(rmdir_name, cwd->files[i].name,FILENAME_SIZE))
+        {
+            if(cwd->files[i].type != FTYPE_DIR) 
+            {
+                i = CMD_FILE_404; //file exists, but is not a directory
+                goto end;
+            }
+            goto removal;
+        }
+    }
+    i = CMD_FILE_404;
+    goto end;
+
+    removal:
+    // first, check if not empty
+    c = fat_copen(&fat_file, cwd->files[i].start, CLUSTER_WRITE);
+    printD("rmdir: rm_idx=%d,rm_ftell=0x%lX",cwd->files[i].start, ftell(c));
+    int rmfnum;
+    fread(&rmfnum, sizeof(int), 1, c);
+    if(rmfnum > 2)
+    {
+        i = CMD_NOT_EMPTY;
+        goto end;
+    }
+
+    // now remove
+    fat_cseek(&fat_file, c, cwd->idx);
+    printD("rmdir: parent_idx=%d,parent_ftell=0x%lX",cwd->idx, ftell(c));
+    cwd->fnum--;
+    fwrite(&(cwd->fnum), sizeof(int), 1, c);
+    fseek(c,FINFO_SIZE*i, SEEK_CUR); // goto FINFO of the deleted dir
+    fwrite(&cwd->files[cwd->fnum],FINFO_SIZE, 1, c); // overwrite with the last entry (fnum is already decremented!)
+
+    fat_file.FAT[cwd->files[i].start] = FAT_FREE; // cwd is not updated
+
+    i = CMD_OK;
+
+    end:
+    if(c) fclose(c);
+    free(cwd);
+    return i;
+}
+
+cmd_err_code_t cmd_rm(void *args)
+{
+    char *rmf_path = ((char **)args)[0];
+    char *rmf_name = NULL;
+    fat_dir_t *cwd = NULL;
+    int i;
+    if(traverse_to_parent(rmf_path, &rmf_name, &cwd) != CMD_OK)
+    {
+        return CMD_PATH_404;
+    }
+
+    FILE *c = NULL;
+    for(i=0;i<cwd->fnum;i++)
+    {
+        if(!strncmp(rmf_name, cwd->files[i].name,FILENAME_SIZE))
+        {
+            if(cwd->files[i].type != FTYPE_FILE) 
+            {
+                i = CMD_FILE_404; //file exists, but is not a regular file
+                goto end;
+            }
+            goto removal;
+        }
+    }
+    i = CMD_FILE_404;
+    goto end;
+
+    removal:
+    c = fat_copen(&fat_file, cwd->idx, CLUSTER_WRITE);
+    cwd->fnum--;
+    fwrite(&(cwd->fnum), sizeof(int), 1, c);
+    fseek(c,FINFO_SIZE*i, SEEK_CUR); // goto FINFO of the deleted dir
+    fwrite(&cwd->files[cwd->fnum],FINFO_SIZE, 1, c); // overwrite with the last entry (fnum is already decremented!)
+    i = CMD_OK;
+
+    end:
+    if(c) fclose(c);
     free(cwd);
     return i;
 }
