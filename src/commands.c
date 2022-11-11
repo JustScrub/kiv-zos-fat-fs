@@ -67,6 +67,11 @@ const static fat_shell_cmd_t command_arr[] = {
         .callback = cmd_mv
     },
     {
+        .id = "cp",
+        .modifying = CMD_MODIFYING,
+        .callback = cmd_cp
+    },
+    {
         .id = "lr",
         .callback = cmd_lr
     },
@@ -477,6 +482,7 @@ cmd_err_code_t cmd_incp(void *args)
         fat_cseek(&fat_file, fs, idx);
     }
     fclose(cpyf);
+    free(cluster_cont);
     //fat_file.FAT[idx] = FAT_EOF;
 
     fat_cseek(&fat_file,fs, cwd->idx);
@@ -561,8 +567,33 @@ cmd_err_code_t cmd_mv(void *args)
     {
         return CMD_FILE_404;
     }
+
+    for(i = 2; i<dir->fnum; i++) // "to" can either be a directory in its parent or not be there at all
+    {
+        if(!strncmp(to_name, dir->files[i].name, FILENAME_SIZE))
+        {
+            if(dir->files[i].type == FTYPE_FILE) // another file is there of the same name -> illegal
+            {
+                free(dir);
+                return CMD_EXIST;
+            }
+            else 
+            {
+                fat_goto_dir(&fat_file, dir, to_name); // is "to" is dir...
+                to_name = from_name; // ...just move to "to", not rename
+                break;
+            }
+        }
+    }
+
+    if(DIR_SIZE(dir->fnum+1) > BLOCK_SIZE) // check if the file can fit there
+    {
+        free(dir);
+        return CMD_NO_MEM;
+    }
     to_idx = dir->idx;
     free(dir);
+
     if(traverse_to_parent(from, &from_name, &dir) != CMD_OK)
     {
         return CMD_PATH_404;
@@ -585,30 +616,6 @@ cmd_err_code_t cmd_mv(void *args)
 
     fat_load_dir_info(&fat_file, dir, to_idx, fs);
 
-    for(i = 2; i<dir->fnum; i++)
-    {
-        if(!strncmp(to_name, dir->files[i].name, FILENAME_SIZE))
-        {
-            if(dir->files[i].type == FTYPE_FILE)
-            {
-                free(dir); fclose(fs);
-                return CMD_EXIST;
-            }
-            else 
-            {
-                fat_goto_dir(&fat_file, dir, to_name);
-                to_name = from_name; // just move, not rename
-                break;
-            }
-        }
-    }
-
-    if(DIR_SIZE(dir->fnum+1) > BLOCK_SIZE)
-    {
-        fclose(fs); free(dir);
-        return CMD_NO_MEM;
-    }
-
     strncpy(move.name, to_name, FILENAME_SIZE);
 
     fat_cseek(&fat_file,fs, dir->idx);
@@ -621,6 +628,119 @@ cmd_err_code_t cmd_mv(void *args)
     free(dir);
     return CMD_OK;
 }
+
+cmd_err_code_t cmd_cp(void *args)
+{
+    char *from =  ((char **)args)[0];
+    char *to  =  ((char **)args)[1];
+    char *to_name, *from_name;
+    int i; 
+    dblock_idx_t to_idx, from_idx;
+
+    i = strlen(from);
+    trim_slash(from,i);
+    i = strlen(to);
+    trim_slash(to,i);
+
+    fat_dir_t *dir = NULL;
+    if(traverse_to_parent(to, &to_name, &dir) != CMD_OK) // check to exists
+    {
+        return CMD_FILE_404;
+    }
+
+    for(i = 2; i<dir->fnum; i++) // "to" can either be a directory in its parent or not be there at all
+    {
+        if(!strncmp(to_name, dir->files[i].name, FILENAME_SIZE))
+        {
+            if(dir->files[i].type == FTYPE_FILE) // another file is there of the same name -> illegal
+            {
+                free(dir);
+                return CMD_EXIST;
+            }
+            else 
+            {
+                fat_goto_dir(&fat_file, dir, to_name); // is "to" is dir...
+                to_name = from_name; // ...just cpy to "to", not rename
+                break;
+            }
+        }
+    }
+
+    if(DIR_SIZE(dir->fnum+1) > BLOCK_SIZE) // check if the file can fit there
+    {
+        free(dir);
+        return CMD_NO_MEM;
+    }
+    to_idx = dir->idx;
+
+    free(dir);
+    if(traverse_to_parent(from, &from_name, &dir) != CMD_OK)
+    {
+        return CMD_PATH_404;
+    }
+
+    for(i=0;i<dir->fnum && strcmp(dir->files[i].name,from_name);i++);
+    if(i>=dir->fnum) 
+    {
+        free(dir); return CMD_PATH_404;
+    }
+    if(dir->files[i].type == FTYPE_DIR)
+    {
+        free(dir);
+        return CMD_PATH_404; //can only cpy files, not dirs
+    }
+
+    dblock_idx_t idx = fat_get_free_cluster(&fat_file);
+    printD("cp start_idx=%d",idx);
+    if(idx == FAT_ERR)
+    {
+        free(dir);
+        return CMD_NO_MEM;
+    }
+    fat_file.FAT[idx] = FAT_EOF;
+    FILE *fs = fat_copen(&fat_file, idx, CLUSTER_WRITE);
+
+    char *cluster_cont = malloc(BLOCK_SIZE*sizeof(char));
+    fat_file_info_t cpy = dir->files[i];
+    cpy.start = idx;
+    printD("cp cpy:name=%s,type=%X,size=%ld,start=%d",cpy.name,cpy.type,cpy.size,cpy.start);
+
+    from_idx = dir->files[i].start;
+    i = (dir->files[i].size/BLOCK_SIZE) + !!(dir->files[i].size%BLOCK_SIZE);
+    printD("cp fsize=%ld,blocks=%d",cpy.size,i);
+
+    for(; i > 0; i--) // write as many times as clusters the cpied has
+    {
+        bzero(cluster_cont,BLOCK_SIZE);
+        fat_cseek(&fat_file, fs, from_idx);
+        fread(cluster_cont, 1, BLOCK_SIZE, fs);
+        fat_cseek(&fat_file, fs, idx);
+        fwrite(cluster_cont, 1, BLOCK_SIZE, fs);
+
+        from_idx = fat_file.FAT[from_idx];
+
+        fat_file.FAT[idx] = fat_get_free_cluster(&fat_file);
+        idx = fat_file.FAT[idx];
+        fat_file.FAT[idx] = FAT_EOF;
+    }
+    free(cluster_cont);
+
+    fat_load_dir_info(&fat_file, dir, to_idx, fs);
+
+    strncpy(cpy.name, to_name, FILENAME_SIZE);
+
+    fat_cseek(&fat_file,fs, dir->idx);
+    dir->fnum++;
+    fwrite(&dir->fnum, sizeof(int), 1, fs);
+    fseek(fs, (dir->fnum-1)*FINFO_SIZE, SEEK_CUR);
+    fwrite(&(cpy), FINFO_SIZE, 1, fs);
+
+    fclose(fs);
+    free(dir);
+    return CMD_OK;
+
+}
+
 
 cmd_err_code_t cmd_lw(void *null)
 {
