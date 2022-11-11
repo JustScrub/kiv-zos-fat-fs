@@ -44,6 +44,15 @@ const static fat_shell_cmd_t command_arr[] = {
         .callback = cmd_rmdir
     },
     {
+        .id = "incp",
+        .modifying = CMD_MODIFYING,
+        .callback = cmd_incp
+    },
+    {
+        .id = "outcp",
+        .callback = cmd_outcp
+    },
+    {
         .id = "lr",
         .callback = cmd_lr
     },
@@ -56,6 +65,17 @@ const static fat_shell_cmd_t command_arr[] = {
         .id = NULL,
         .callback = NULL
     }
+};
+
+const static cmd_err_code_t fat_to_cmd_err[] = {
+    [FAT_OK] = CMD_OK,
+    [FAT_FILE_404] = CMD_FILE_404,
+    [FAT_PATH_404] = CMD_PATH_404,
+    [FAT_NOT_EMPTY] = CMD_NOT_EMPTY,
+    [FAT_EXIST] = CMD_EXIST,
+    [FAT_NO_MEM] = CMD_NO_MEM,
+    [FAT_FPTR_ERR] = CMD_FAT_ERR,
+    [FAT_ERR_CRITICAL] = CMD_FAT_ERR
 };
 
 #define trim_slash(path, len) do{path[len-1] = path[len-1] == '/'? 0 : path[len-1]; len--;}while(0)
@@ -302,7 +322,7 @@ cmd_err_code_t traverse_to_parent(char *whole_path, char **name, fat_dir_t **cwd
     if(*name != whole_path) //there is path and the name
     if(fat_goto_dir(&fat_file, *cwd, whole_path) != FAT_OK) // -> traverse to that path to make the dir there
     {
-        free(cwd);
+        free(*cwd);
         return CMD_PATH_404;
     }
     return CMD_OK;
@@ -319,24 +339,9 @@ cmd_err_code_t cmd_mkdir(void *args)
         return CMD_PATH_404;
     }
 
-    for(i=0;i<cwd->fnum;i++)
-    {
-        if(!strncmp(newdir_name, cwd->files[i].name,FILENAME_SIZE))
-        {
-            return CMD_EXIST;
-        }
-    }
-
     i=fat_mkdir(&fat_file,cwd,newdir_name);
     free(cwd);
-    switch (i)
-    {
-    case FAT_NO_MEM:  return CMD_NO_MEM;
-    case FAT_ERR_CRITICAL:
-    case FAT_FPTR_ERR: return CMD_FAT_ERR;
-    //no other error possible
-    default: return CMD_OK;
-    }
+    return fat_to_cmd_err[i];
 }
 
 cmd_err_code_t cmd_rmdir(void *args)
@@ -350,50 +355,10 @@ cmd_err_code_t cmd_rmdir(void *args)
         return CMD_PATH_404;
     }
 
-    FILE *c = NULL;
-    for(i=0;i<cwd->fnum;i++)
-    {
-        if(!strncmp(rmdir_name, cwd->files[i].name,FILENAME_SIZE))
-        {
-            if(cwd->files[i].type != FTYPE_DIR) 
-            {
-                i = CMD_FILE_404; //file exists, but is not a directory
-                goto end;
-            }
-            goto removal;
-        }
-    }
-    i = CMD_FILE_404;
-    goto end;
+    i = fat_remove_file(&fat_file, cwd, rmdir_name);
 
-    removal:
-    // first, check if not empty
-    c = fat_copen(&fat_file, cwd->files[i].start, CLUSTER_WRITE);
-    printD("rmdir: rm_idx=%d,rm_ftell=0x%lX",cwd->files[i].start, ftell(c));
-    int rmfnum;
-    fread(&rmfnum, sizeof(int), 1, c);
-    if(rmfnum > 2)
-    {
-        i = CMD_NOT_EMPTY;
-        goto end;
-    }
-
-    // now remove
-    fat_cseek(&fat_file, c, cwd->idx);
-    printD("rmdir: parent_idx=%d,parent_ftell=0x%lX",cwd->idx, ftell(c));
-    cwd->fnum--;
-    fwrite(&(cwd->fnum), sizeof(int), 1, c);
-    fseek(c,FINFO_SIZE*i, SEEK_CUR); // goto FINFO of the deleted dir
-    fwrite(&cwd->files[cwd->fnum],FINFO_SIZE, 1, c); // overwrite with the last entry (fnum is already decremented!)
-
-    fat_file.FAT[cwd->files[i].start] = FAT_FREE; // cwd is not updated
-
-    i = CMD_OK;
-
-    end:
-    if(c) fclose(c);
     free(cwd);
-    return i;
+    return fat_to_cmd_err[i];
 }
 
 cmd_err_code_t cmd_rm(void *args)
@@ -407,34 +372,155 @@ cmd_err_code_t cmd_rm(void *args)
         return CMD_PATH_404;
     }
 
-    FILE *c = NULL;
-    for(i=0;i<cwd->fnum;i++)
-    {
-        if(!strncmp(rmf_name, cwd->files[i].name,FILENAME_SIZE))
-        {
-            if(cwd->files[i].type != FTYPE_FILE) 
-            {
-                i = CMD_FILE_404; //file exists, but is not a regular file
-                goto end;
-            }
-            goto removal;
-        }
-    }
-    i = CMD_FILE_404;
-    goto end;
+    i = fat_remove_file(&fat_file, cwd, rmf_name);
 
-    removal:
-    c = fat_copen(&fat_file, cwd->idx, CLUSTER_WRITE);
-    cwd->fnum--;
-    fwrite(&(cwd->fnum), sizeof(int), 1, c);
-    fseek(c,FINFO_SIZE*i, SEEK_CUR); // goto FINFO of the deleted dir
-    fwrite(&cwd->files[cwd->fnum],FINFO_SIZE, 1, c); // overwrite with the last entry (fnum is already decremented!)
-    i = CMD_OK;
-
-    end:
-    if(c) fclose(c);
     free(cwd);
     return i;
+}
+
+cmd_err_code_t cmd_incp(void *args)
+{
+    char *outf =  ((char **)args)[0];
+    char *inf  =  ((char **)args)[1];
+    char *inf_name;
+
+    fat_dir_t *cwd = NULL;
+    if(traverse_to_parent(inf, &inf_name, &cwd) != CMD_OK || inf_name[strlen(inf_name)-1] == '/')
+    {
+        if(cwd) free(cwd);
+        return CMD_PATH_404;
+    }
+
+    if(cwd->fnum >= DDIR_LEN)
+    {
+        free(cwd);
+        return CMD_NO_MEM;
+    }
+
+    for(int i=0; i<cwd->fnum; i++)
+    {
+        if(!strcmp(inf_name,cwd->files[i].name))
+        {
+            free(cwd);
+            return CMD_EXIST;
+        }
+    }
+
+    FILE *cpyf = fopen(outf, "rb+");
+    if(!cpyf)
+    {
+        free(cwd);
+        return CMD_FILE_404;
+    }
+    
+    dblock_idx_t idx = fat_get_free_cluster(&fat_file);
+    printD("incp start_idx=%d",idx);
+    if(idx == FAT_ERR)
+    {
+        fclose(cpyf); free(cwd);
+        return CMD_NO_MEM;
+    }
+    fat_file.FAT[idx] = FAT_EOF;
+    dblock_idx_t start = idx;
+    FILE *fs = fat_copen(&fat_file, idx, CLUSTER_WRITE);
+
+    char *cluster_cont = malloc(BLOCK_SIZE*sizeof(char));
+    int read_bytes;
+    long fsize = 0;
+
+    while(1)
+    {
+        bzero(cluster_cont,BLOCK_SIZE);
+        read_bytes = fread(cluster_cont, 1, BLOCK_SIZE, cpyf);
+        fsize += read_bytes;
+        fwrite(cluster_cont, 1, read_bytes, fs);
+        if(ungetc(getc(cpyf), cpyf) == EOF || read_bytes < BLOCK_SIZE) break;
+
+        fat_file.FAT[idx] = fat_get_free_cluster(&fat_file);
+        //printD("incp: loop idx=%d,next_idx=%d",idx, fat_file.FAT[idx]);
+        idx = fat_file.FAT[idx];
+        if( idx  == FAT_ERR)
+        {
+            fclose(fs); fclose(cpyf);
+            free(cwd); free(cluster_cont);
+            return CMD_NO_MEM;
+        }
+        fat_file.FAT[idx] = FAT_EOF; //not to obtain it in next iter
+        fat_cseek(&fat_file, fs, idx);
+    }
+    fclose(cpyf);
+    //fat_file.FAT[idx] = FAT_EOF;
+
+    fat_cseek(&fat_file,fs, cwd->idx);
+    cwd->fnum++;
+    fwrite(&cwd->fnum, sizeof(int), 1, fs);
+    fseek(fs, (cwd->fnum-1)*FINFO_SIZE,SEEK_CUR);
+    fat_file_info_t newinfo = {
+        .size = fsize,
+        .type = FTYPE_FILE,
+        .start = start
+    };
+    strncpy(newinfo.name, inf_name, FILENAME_SIZE);
+    fwrite(&newinfo, FINFO_SIZE, 1, fs);
+
+    fclose(fs);
+    free(cwd);
+    return CMD_OK;
+}
+
+cmd_err_code_t cmd_outcp(void *args)
+{
+    char *inf =  ((char **)args)[0];
+    char *inf_name;
+    char *outf  =  ((char **)args)[1];
+
+    fat_dir_t *cwd = NULL;
+    if(traverse_to_parent(inf, &inf_name, &cwd) != CMD_OK || inf_name[strlen(inf_name)-1] == '/')
+    {
+        if(cwd) free(cwd);
+        return CMD_PATH_404;
+    }
+
+    dblock_idx_t idx = FAT_ERR;
+    unsigned long fsize;
+
+    for(int i=0; i<cwd->fnum; i++)
+    {
+        if(!strcmp(inf_name,cwd->files[i].name))
+        {
+            idx = cwd->files[i].start;
+            fsize = cwd->files[i].size;
+            break;
+        }
+    }
+    if(idx == FAT_ERR)
+    {
+        free(cwd);
+        printD("outcp not_found_in cwd_idx=%i",cwd->idx);
+        return CMD_FILE_404;
+    }
+
+    FILE *cpyf = fopen(outf, "wb");
+    if(!cpyf) return CMD_FILE_404;
+    FILE *fs = fat_copen(&fat_file, idx, CLUSTER_READ);
+    char *bfr = malloc(BLOCK_SIZE);
+
+    while(1)
+    {
+        bzero(bfr, BLOCK_SIZE);
+        fread(bfr, 1, BLOCK_SIZE, fs);
+        fwrite(bfr, 1, (fsize/BLOCK_SIZE)? BLOCK_SIZE : (fsize%BLOCK_SIZE), cpyf );
+        fsize -= BLOCK_SIZE;
+        idx = fat_file.FAT[idx];
+        if((long)fsize <= 0 || idx == FAT_EOF) break;
+        fat_cseek(&fat_file, fs, idx);
+    }
+
+    fclose(cpyf); fclose(fs);
+    free(cwd); free(bfr);
+
+    return CMD_OK;
+
 }
 
 cmd_err_code_t cmd_lw(void *null)

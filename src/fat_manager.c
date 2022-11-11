@@ -152,6 +152,15 @@ fat_manag_err_code_t fat_mkdir(fat_info_t *info, fat_dir_t *root, char *dname)
         return FAT_NO_MEM;
     }
 
+    if(root)
+    for(int i=0;i<root->fnum;i++)
+    {
+        if(!strncmp(dname, root->files[i].name,FILENAME_SIZE))
+        {
+            return FAT_EXIST;
+        }
+    }
+
     fat_file_info_t finfo = {0};
     dblock_idx_t cluster = root? fat_get_free_cluster(info): 0;
     dblock_idx_t parent = root? root->idx : 0;
@@ -278,6 +287,55 @@ fat_manag_err_code_t fat_load_dir_info(fat_info_t *info, fat_dir_t *dir, dblock_
     dir->idx = dir_idx;
     printD("fat_load_dir_info: fnum=%i,idx=%i,ftell=0x%lX",dir->fnum, dir_idx, ftell(c));
     if(!fs) fclose(c);
+    return FAT_OK;
+}
+
+fat_manag_err_code_t fat_remove_file(fat_info_t *info, fat_dir_t *cwd, char *rmdir_name)
+{
+    FILE *c = NULL;
+    int i;
+    for(i=0;i<cwd->fnum;i++)
+    {
+        if(!strncmp(rmdir_name, cwd->files[i].name,FILENAME_SIZE))
+        {
+            goto removal;
+        }
+    }
+    return FAT_FILE_404;
+
+    removal:
+    c = fat_copen(info, cwd->files[i].start, CLUSTER_WRITE);
+    if(cwd->files[i].type == FTYPE_DIR)
+    {
+        // first, check if not empty
+        printD("fat_rm: rm_idx=%d,rm_ftell=0x%lX",cwd->files[i].start, ftell(c));
+        int rmfnum;
+        fread(&rmfnum, sizeof(int), 1, c);
+        if(rmfnum > 2)
+        {
+            fclose(c);
+            return FAT_NOT_EMPTY;
+        }
+    }
+
+    // now remove
+    fat_cseek(info, c, cwd->idx);
+    printD("fat_rm: parent_idx=%d,parent_ftell=0x%lX",cwd->idx, ftell(c));
+    cwd->fnum--;
+    fwrite(&(cwd->fnum), sizeof(int), 1, c);
+    fseek(c,FINFO_SIZE*i, SEEK_CUR); // goto FINFO of the deleted dir
+    fwrite(&cwd->files[cwd->fnum],FINFO_SIZE, 1, c); // overwrite with the last entry (fnum is already decremented!)
+
+    dblock_idx_t idx = cwd->files[i].start; // cwd is not updated
+    for(;;)
+    {
+        i = info->FAT[idx];
+        info->FAT[idx] = FAT_FREE;
+        idx = i;
+        if(idx == FAT_EOF) break;
+    }
+
+    fclose(c);
     return FAT_OK;
 }
 

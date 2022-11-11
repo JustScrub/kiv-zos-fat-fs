@@ -217,6 +217,7 @@ cmd_err_code_t cmd_info(void *args);
  *  - CMD_OK: success
  *  - CMD_FILE_404: File not found
  *  - CMD_PATH_404: Path not found
+ *  - CMD_NO_MEM
  */
 cmd_err_code_t cmd_incp(void *args);
 

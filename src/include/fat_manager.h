@@ -90,12 +90,14 @@ typedef struct
 typedef enum
 {
     FAT_OK = 0,
-    FAT_BAD_FORMAT,
     FAT_FILE_404,
     FAT_PATH_404,
+    FAT_NOT_EMPTY,
+    FAT_EXIST,
     FAT_NO_MEM,
     FAT_FPTR_ERR,       /**< error while handling the open FS FILE* */
-    FAT_ERR_CRITICAL    /**< critical error, must reformat the FS. Some data might be possible to retrieve */
+    FAT_ERR_CRITICAL,    /**< critical error, must reformat the FS. Some data might be possible to retrieve */
+    FAT_BAD_FORMAT,
 } fat_manag_err_code_t;
 
 
@@ -247,6 +249,17 @@ fat_manag_err_code_t fat_goto_dir(fat_info_t *info, fat_dir_t *root, char *path)
  * @return fat_manag_err_code_t 
  */
 fat_manag_err_code_t fat_load_dir_info(fat_info_t *info, fat_dir_t *dir, dblock_idx_t dir_idx, FILE* fs);
+
+/**
+ * @brief Remove a file specified by the \c name in the directory pointed to by \c root
+ * 
+ * @param info 
+ * @param root 
+ * @param name 
+ * @return fat_manag_err_code_t 
+ *  - FAT_OK, FAT_FILE_404, FAT_NOT_EMPTY
+ */
+fat_manag_err_code_t fat_remove_file(fat_info_t *info, fat_dir_t *root, char *name);
 
 /**
  * @brief Obtain one free data block from the FS. This does not remove the FAT_FREE mark!
