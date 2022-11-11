@@ -17,6 +17,7 @@ typedef enum {
     CMD_NO_MEM,                 /**< No free memory in the file system */
     CMD_INV_ARG,                /**< Invalid argument */
     CMD_FAT_ERR,                /**< Other error within the FAT FS*/
+    CMD_RM_CURR,
 
     CMD_UNKNOWN                 /**< Unknown command */
 } cmd_err_code_t;

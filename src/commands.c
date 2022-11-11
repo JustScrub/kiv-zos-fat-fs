@@ -44,6 +44,11 @@ const static fat_shell_cmd_t command_arr[] = {
         .callback = cmd_rmdir
     },
     {
+        .id = "rm",
+        .modifying = CMD_MODIFYING,
+        .callback = cmd_rm
+    },
+    {
         .id = "incp",
         .modifying = CMD_MODIFYING,
         .callback = cmd_incp
@@ -51,6 +56,10 @@ const static fat_shell_cmd_t command_arr[] = {
     {
         .id = "outcp",
         .callback = cmd_outcp
+    },
+    {
+        .id = "cat",
+        .callback = cmd_cat
     },
     {
         .id = "lr",
@@ -314,6 +323,8 @@ cmd_err_code_t traverse_to_parent(char *whole_path, char **name, fat_dir_t **cwd
     }
     else *name = whole_path;
     // length of the name does not matter rn. It will be handeled in fat_mkdir
+
+    if(!*whole_path) whole_path = "/"; // if points to NULL -> path was something like /name -> so path is root
     printD("traverse_to_parent: path=%s,dname=%s",whole_path,*name);
 
     *cwd = malloc(sizeof(fat_dir_t));// dir struct for traversing
@@ -350,12 +361,18 @@ cmd_err_code_t cmd_rmdir(void *args)
     char *rmdir_name = NULL;
     fat_dir_t *cwd = NULL;
     int i;
+
+    if(!strcmp(fat_file.pwd, rmdir_path))
+    {
+        return CMD_RM_CURR;
+    }
+
     if(traverse_to_parent(rmdir_path, &rmdir_name, &cwd) != CMD_OK)
     {
         return CMD_PATH_404;
     }
 
-    i = fat_remove_file(&fat_file, cwd, rmdir_name);
+    i = fat_remove_file(&fat_file, cwd, rmdir_name, FTYPE_DIR);
 
     free(cwd);
     return fat_to_cmd_err[i];
@@ -372,10 +389,10 @@ cmd_err_code_t cmd_rm(void *args)
         return CMD_PATH_404;
     }
 
-    i = fat_remove_file(&fat_file, cwd, rmf_name);
+    i = fat_remove_file(&fat_file, cwd, rmf_name, FTYPE_FILE);
 
     free(cwd);
-    return i;
+    return fat_to_cmd_err[i];
 }
 
 cmd_err_code_t cmd_incp(void *args)
@@ -465,6 +482,7 @@ cmd_err_code_t cmd_incp(void *args)
 
     fclose(fs);
     free(cwd);
+    fat_file.last_write = time(NULL);
     return CMD_OK;
 }
 
@@ -473,6 +491,32 @@ cmd_err_code_t cmd_outcp(void *args)
     char *inf =  ((char **)args)[0];
     char *inf_name;
     char *outf  =  ((char **)args)[1];
+    fat_manag_err_code_t e;
+
+    fat_dir_t *cwd = NULL;
+    if(traverse_to_parent(inf, &inf_name, &cwd) != CMD_OK || inf_name[strlen(inf_name)-1] == '/')
+    {
+        if(cwd) free(cwd);
+        return CMD_PATH_404;
+    }
+    FILE *cpyf = fopen(outf, "wb");
+    if(!cpyf) return CMD_FILE_404;
+
+    e = fat_cat_into(&fat_file, cwd, inf_name, cpyf);
+
+    fclose(cpyf);
+    free(cwd);
+
+    if(e==FAT_OK) fat_file.last_read = time(NULL);
+    return fat_to_cmd_err[e];
+
+}
+
+cmd_err_code_t cmd_cat(void *args)
+{
+    char *inf =  ((char **)args)[0];
+    char *inf_name;
+    fat_manag_err_code_t e;
 
     fat_dir_t *cwd = NULL;
     if(traverse_to_parent(inf, &inf_name, &cwd) != CMD_OK || inf_name[strlen(inf_name)-1] == '/')
@@ -481,46 +525,12 @@ cmd_err_code_t cmd_outcp(void *args)
         return CMD_PATH_404;
     }
 
-    dblock_idx_t idx = FAT_ERR;
-    unsigned long fsize;
+    e = fat_cat_into(&fat_file, cwd, inf_name, stdout);
 
-    for(int i=0; i<cwd->fnum; i++)
-    {
-        if(!strcmp(inf_name,cwd->files[i].name))
-        {
-            idx = cwd->files[i].start;
-            fsize = cwd->files[i].size;
-            break;
-        }
-    }
-    if(idx == FAT_ERR)
-    {
-        free(cwd);
-        printD("outcp not_found_in cwd_idx=%i",cwd->idx);
-        return CMD_FILE_404;
-    }
+    free(cwd);
 
-    FILE *cpyf = fopen(outf, "wb");
-    if(!cpyf) return CMD_FILE_404;
-    FILE *fs = fat_copen(&fat_file, idx, CLUSTER_READ);
-    char *bfr = malloc(BLOCK_SIZE);
-
-    while(1)
-    {
-        bzero(bfr, BLOCK_SIZE);
-        fread(bfr, 1, BLOCK_SIZE, fs);
-        fwrite(bfr, 1, (fsize/BLOCK_SIZE)? BLOCK_SIZE : (fsize%BLOCK_SIZE), cpyf );
-        fsize -= BLOCK_SIZE;
-        idx = fat_file.FAT[idx];
-        if((long)fsize <= 0 || idx == FAT_EOF) break;
-        fat_cseek(&fat_file, fs, idx);
-    }
-
-    fclose(cpyf); fclose(fs);
-    free(cwd); free(bfr);
-
-    return CMD_OK;
-
+    if(e==FAT_OK) fat_file.last_read = time(NULL);
+    return fat_to_cmd_err[e];
 }
 
 cmd_err_code_t cmd_lw(void *null)
@@ -567,16 +577,17 @@ cmd_err_code_t cmd_exec(char *cmd_id, void *args){
 
 
 char *cmd_err_msgs[] = {
-    "Success.",
-    "File not found.",
-    "Path does not exist.",
-    "Already exists.",
-    "Directory not empty.",
-    "Format failed.",
-    "Out of memory.",
-    "Invalid argument",
-    "Filesystem error.",
-    "Unknown command."
+    [CMD_OK] = "Success.",
+    [CMD_FILE_404] = "File not found.",
+    [CMD_PATH_404] = "Path does not exist.",
+    [CMD_EXIST] = "Already exists.",
+    [CMD_NOT_EMPTY] = "Directory not empty.",
+    [CMD_CANNOT_CREATE_FILE] = "Format failed.",
+    [CMD_NO_MEM] = "Out of memory.",
+    [CMD_INV_ARG] = "Invalid argument",
+    [CMD_FAT_ERR] = "Filesystem error.",
+    [CMD_RM_CURR] = "Cannot remove current directory",
+    [CMD_UNKNOWN] = "Unknown command."
 };
 void pcmderr(cmd_err_code_t err)
 {

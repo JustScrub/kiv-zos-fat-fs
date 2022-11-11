@@ -259,7 +259,18 @@ fat_manag_err_code_t fat_load_dir_info(fat_info_t *info, fat_dir_t *dir, dblock_
  * @return fat_manag_err_code_t 
  *  - FAT_OK, FAT_FILE_404, FAT_NOT_EMPTY
  */
-fat_manag_err_code_t fat_remove_file(fat_info_t *info, fat_dir_t *root, char *name);
+fat_manag_err_code_t fat_remove_file(fat_info_t *info, fat_dir_t *root, char *name, unsigned char type);
+
+/**
+ * @brief Write the content of the file \c root/name into the file stream \c cat
+ * 
+ * @param info 
+ * @param root 
+ * @param name 
+ * @param cat 
+ * @return fat_manag_err_code_t 
+ */
+fat_manag_err_code_t fat_cat_into(fat_info_t *info, fat_dir_t *root, char *name, FILE *cat);
 
 /**
  * @brief Obtain one free data block from the FS. This does not remove the FAT_FREE mark!

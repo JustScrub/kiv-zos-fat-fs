@@ -290,15 +290,57 @@ fat_manag_err_code_t fat_load_dir_info(fat_info_t *info, fat_dir_t *dir, dblock_
     return FAT_OK;
 }
 
-fat_manag_err_code_t fat_remove_file(fat_info_t *info, fat_dir_t *cwd, char *rmdir_name)
+fat_manag_err_code_t fat_cat_into(fat_info_t *info, fat_dir_t *cwd, char *inf_name, FILE *cpyf)
+{
+    dblock_idx_t idx = FAT_ERR;
+    unsigned long fsize;
+
+    for(int i=0; i<cwd->fnum; i++)
+    {
+        if(!strcmp(inf_name,cwd->files[i].name))
+        {
+            idx = cwd->files[i].start;
+            fsize = cwd->files[i].size;
+            break;
+        }
+    }
+    if(idx == FAT_ERR)
+    {
+        return FAT_FILE_404;
+    }
+
+    
+    FILE *fs = fat_copen(info, idx, CLUSTER_READ);
+    char *bfr = malloc(BLOCK_SIZE);
+
+    while(1)
+    {
+        bzero(bfr, BLOCK_SIZE);
+        fread(bfr, 1, BLOCK_SIZE, fs);
+        fwrite(bfr, 1, (fsize/BLOCK_SIZE)? BLOCK_SIZE : (fsize%BLOCK_SIZE), cpyf );
+        fsize -= BLOCK_SIZE;
+        idx = info->FAT[idx];
+        if((long)fsize <= 0 || idx == FAT_EOF) break;
+        fat_cseek(info, fs, idx);
+    }
+
+    fclose(fs);
+    free(bfr);
+    return FAT_OK;
+}
+
+fat_manag_err_code_t fat_remove_file(fat_info_t *info, fat_dir_t *cwd, char *rmdir_name, unsigned char type)
 {
     FILE *c = NULL;
     int i;
+    printD("fat_rmf: name=%s, type=%c", rmdir_name, type==FTYPE_DIR? 'D':'F');
     for(i=0;i<cwd->fnum;i++)
     {
         if(!strncmp(rmdir_name, cwd->files[i].name,FILENAME_SIZE))
         {
-            goto removal;
+            if(cwd->files[i].type == type)
+                goto removal;
+            else break;
         }
     }
     return FAT_FILE_404;
