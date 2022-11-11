@@ -62,6 +62,11 @@ const static fat_shell_cmd_t command_arr[] = {
         .callback = cmd_cat
     },
     {
+        .id = "mv",
+        .modifying = CMD_MODIFYING,
+        .callback = cmd_mv
+    },
+    {
         .id = "lr",
         .callback = cmd_lr
     },
@@ -322,7 +327,7 @@ cmd_err_code_t traverse_to_parent(char *whole_path, char **name, fat_dir_t **cwd
         (*name)++;
     }
     else *name = whole_path;
-    // length of the name does not matter rn. It will be handeled in fat_mkdir
+    // length of the name does not matter rn.
 
     if(!*whole_path) whole_path = "/"; // if points to NULL -> path was something like /name -> so path is root
     printD("traverse_to_parent: path=%s,dname=%s",whole_path,*name);
@@ -331,7 +336,7 @@ cmd_err_code_t traverse_to_parent(char *whole_path, char **name, fat_dir_t **cwd
     memcpy(*cwd, curr_dir, sizeof(fat_dir_t)); 
 
     if(*name != whole_path) //there is path and the name
-    if(fat_goto_dir(&fat_file, *cwd, whole_path) != FAT_OK) // -> traverse to that path to make the dir there
+    if(fat_goto_dir(&fat_file, *cwd, whole_path) != FAT_OK) // -> traverse to that path
     {
         free(*cwd);
         return CMD_PATH_404;
@@ -360,11 +365,17 @@ cmd_err_code_t cmd_rmdir(void *args)
     char *rmdir_path = ((char **)args)[0];
     char *rmdir_name = NULL;
     fat_dir_t *cwd = NULL;
-    int i;
+    int i = strlen(rmdir_path);
+
+    trim_slash(rmdir_path, i);
 
     if(!strcmp(fat_file.pwd, rmdir_path))
     {
         return CMD_RM_CURR;
+    }
+    if(!strncmp(".",rmdir_path,1) || !strncmp("..",rmdir_path,2))
+    {
+        return CMD_PATH_404;
     }
 
     if(traverse_to_parent(rmdir_path, &rmdir_name, &cwd) != CMD_OK)
@@ -533,6 +544,84 @@ cmd_err_code_t cmd_cat(void *args)
     return fat_to_cmd_err[e];
 }
 
+cmd_err_code_t cmd_mv(void *args)
+{
+    char *from =  ((char **)args)[0];
+    char *to  =  ((char **)args)[1];
+    char *to_name, *from_name;
+    int i; dblock_idx_t to_idx;
+
+    i = strlen(from);
+    trim_slash(from,i);
+    i = strlen(to);
+    trim_slash(to,i);
+
+    fat_dir_t *dir = NULL;
+    if(traverse_to_parent(to, &to_name, &dir) != CMD_OK) // check to exists
+    {
+        return CMD_FILE_404;
+    }
+    to_idx = dir->idx;
+    free(dir);
+    if(traverse_to_parent(from, &from_name, &dir) != CMD_OK)
+    {
+        return CMD_PATH_404;
+    }
+
+    for(i=0;i<dir->fnum && strcmp(dir->files[i].name,from_name);i++);
+    if(i>=dir->fnum) 
+    {
+        free(dir); return CMD_PATH_404;
+    }
+
+    fat_file_info_t move = dir->files[i];
+    printD("mv: move:name=%s,type=%X,start=%d,size=%ld",move.name,move.type,move.start,move.size);
+    FILE *fs = fat_copen(&fat_file, dir->idx, CLUSTER_WRITE);
+    dir->fnum--;
+    fwrite(&(dir->fnum), sizeof(int), 1, fs);
+    fseek(fs,FINFO_SIZE*i, SEEK_CUR); // goto FINFO to delete
+    fwrite(&dir->files[dir->fnum],FINFO_SIZE, 1, fs); // overwrite with the last entry (fnum is already decremented!)
+    fflush(fs);
+
+    fat_load_dir_info(&fat_file, dir, to_idx, fs);
+
+    for(i = 2; i<dir->fnum; i++)
+    {
+        if(!strncmp(to_name, dir->files[i].name, FILENAME_SIZE))
+        {
+            if(dir->files[i].type == FTYPE_FILE)
+            {
+                free(dir); fclose(fs);
+                return CMD_EXIST;
+            }
+            else 
+            {
+                fat_goto_dir(&fat_file, dir, to_name);
+                to_name = from_name; // just move, not rename
+                break;
+            }
+        }
+    }
+
+    if(DIR_SIZE(dir->fnum+1) > BLOCK_SIZE)
+    {
+        fclose(fs); free(dir);
+        return CMD_NO_MEM;
+    }
+
+    strncpy(move.name, to_name, FILENAME_SIZE);
+
+    fat_cseek(&fat_file,fs, dir->idx);
+    dir->fnum++;
+    fwrite(&dir->fnum, sizeof(int), 1, fs);
+    fseek(fs, (dir->fnum-1)*FINFO_SIZE, SEEK_CUR);
+    fwrite(&(move), FINFO_SIZE, 1, fs);
+
+    fclose(fs);
+    free(dir);
+    return CMD_OK;
+}
+
 cmd_err_code_t cmd_lw(void *null)
 {
     time_t t = fat_file.last_write;
@@ -565,9 +654,9 @@ cmd_err_code_t cmd_exec(char *cmd_id, void *args){
             err = cmd->callback(args);
             if(cmd->modifying)
             {
+                printD("cmd_exec: modifying=%s",cmd->id);
                 update_cache();
                 fat_write_info(&fat_file);
-                printD("cmd_exec: modifying=%s",cmd->id);
             }
             return err;
         }

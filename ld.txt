@@ -1,5 +1,5 @@
 format 100KB
-incp Screenshot_1.png scr
-incp ones.txt ones
 mkdir a
 mkdir a/b
+incp Screenshot_1.png scr
+incp ones2.txt ones

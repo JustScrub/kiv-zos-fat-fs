@@ -362,7 +362,7 @@ fat_manag_err_code_t fat_remove_file(fat_info_t *info, fat_dir_t *cwd, char *rmd
 
     // now remove
     fat_cseek(info, c, cwd->idx);
-    printD("fat_rm: parent_idx=%d,parent_ftell=0x%lX",cwd->idx, ftell(c));
+    printD("fat_rm: parent_idx=%d,parent_ftell=0x%lX,parent_fnum=%d",cwd->idx, ftell(c),cwd->fnum);
     cwd->fnum--;
     fwrite(&(cwd->fnum), sizeof(int), 1, c);
     fseek(c,FINFO_SIZE*i, SEEK_CUR); // goto FINFO of the deleted dir
