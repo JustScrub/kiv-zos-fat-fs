@@ -1,4 +1,6 @@
 MladyFatFS
 fs
-ones*.txt
-*.png
+input/*
+output/*
+commands
+check.sh

@@ -72,6 +72,15 @@ const static fat_shell_cmd_t command_arr[] = {
         .callback = cmd_cp
     },
     {
+        .id = "info",
+        .callback = cmd_info
+    },
+    {
+        .id = "defrag",
+        .modifying = CMD_MODIFYING,
+        .callback = cmd_defrag
+    },
+    {
         .id = "lr",
         .callback = cmd_lr
     },
@@ -252,7 +261,7 @@ cmd_err_code_t cmd_load(void *args)
     {
         bzero(bfr,256);
         err = load_cmd(batchf,bfr,256);
-        if(err) break;
+        if(err) pcmderr(err);
     }
     fclose(batchf);
     return err;
@@ -326,7 +335,7 @@ cmd_err_code_t traverse_to_parent(char *whole_path, char **name, fat_dir_t **cwd
     //trim optional ending '/'
     trim_slash(whole_path, i);
 
-    *name = strrchr(whole_path,'/'); // mkdir in cwd -> this returns NULL (there is no path, only dir name)
+    *name = strrchr(whole_path,'/'); // if in cwd -> this returns NULL (there is no path, only dir name)
     if(*name){
         **name = 0; // split into two strings
         (*name)++;
@@ -370,9 +379,7 @@ cmd_err_code_t cmd_rmdir(void *args)
     char *rmdir_path = ((char **)args)[0];
     char *rmdir_name = NULL;
     fat_dir_t *cwd = NULL;
-    int i = strlen(rmdir_path);
-
-    trim_slash(rmdir_path, i);
+    int i;
 
     if(!strcmp(fat_file.pwd, rmdir_path))
     {
@@ -399,7 +406,10 @@ cmd_err_code_t cmd_rm(void *args)
     char *rmf_path = ((char **)args)[0];
     char *rmf_name = NULL;
     fat_dir_t *cwd = NULL;
-    int i;
+    int i = strlen(rmf_path)-1;
+
+    if(rmf_path[i] == '/') return CMD_PATH_404; //cannot remove directories
+
     if(traverse_to_parent(rmf_path, &rmf_name, &cwd) != CMD_OK)
     {
         return CMD_PATH_404;
@@ -411,34 +421,61 @@ cmd_err_code_t cmd_rm(void *args)
     return fat_to_cmd_err[i];
 }
 
+cmd_err_code_t cp_checks(char *to, char **to_name, fat_dir_t **dir)
+{
+    if(traverse_to_parent(to, to_name, dir) != CMD_OK) // check to exists
+    {
+        return CMD_FILE_404;
+    }
+
+    for(int i = 2; i<(*dir)->fnum; i++) // "to" can either be a directory in its parent or not be there at all
+    {
+        if(!strncmp(*to_name, (*dir)->files[i].name, FILENAME_SIZE))
+        {
+            if((*dir)->files[i].type == FTYPE_FILE) // another file is there of the same name -> illegal
+            {
+                free(*dir);
+                return CMD_EXIST;
+            }
+            else 
+            {
+                fat_goto_dir(&fat_file, *dir, *to_name); // if "to" is dir...
+                *to_name = NULL; // ...just cpy to "to" later, not rename
+                break;
+            }
+        }
+    }
+
+    if(DIR_SIZE((*dir)->fnum+1) > BLOCK_SIZE) // check if the file can fit there
+    {
+        free(*dir);
+        return CMD_NO_MEM;
+    }
+    return CMD_OK;
+}
+
 cmd_err_code_t cmd_incp(void *args)
 {
     char *outf =  ((char **)args)[0];
     char *inf  =  ((char **)args)[1];
-    char *inf_name;
+    char *inf_name, *outf_name;
+
+    int i = strlen(outf)-1;
+    if(outf[i] == '/') return CMD_INV_ARG; // cannot incp directories
 
     fat_dir_t *cwd = NULL;
-    if(traverse_to_parent(inf, &inf_name, &cwd) != CMD_OK || inf_name[strlen(inf_name)-1] == '/')
-    {
-        if(cwd) free(cwd);
-        return CMD_PATH_404;
-    }
+    i= cp_checks(inf, &inf_name, &cwd);
+    if(i != CMD_OK) return i;
 
-    if(cwd->fnum >= DDIR_LEN)
+    if(!inf_name) // inf is existing directory, copy the file there, not rename
     {
-        free(cwd);
-        return CMD_NO_MEM;
-    }
+        outf_name = strrchr(outf, '/');
+        if(!outf_name) outf_name = outf;
+        else outf_name++;
 
-    for(int i=0; i<cwd->fnum; i++)
-    {
-        if(!strcmp(inf_name,cwd->files[i].name))
-        {
-            free(cwd);
-            return CMD_EXIST;
-        }
+        inf_name = outf_name;
     }
-
+    
     FILE *cpyf = fopen(outf, "rb+");
     if(!cpyf)
     {
@@ -470,19 +507,20 @@ cmd_err_code_t cmd_incp(void *args)
         if(ungetc(getc(cpyf), cpyf) == EOF || read_bytes < BLOCK_SIZE) break;
 
         fat_file.FAT[idx] = fat_get_free_cluster(&fat_file);
+        if( fat_file.FAT[idx]  == FAT_ERR)
+        {
+            fat_file.FAT[idx] = FAT_EOF; // no memory -> truncate the file and return NO_MEM
+            idx = FAT_ERR;
+            break;
+        }
         //printD("incp: loop idx=%d,next_idx=%d",idx, fat_file.FAT[idx]);
         idx = fat_file.FAT[idx];
-        if( idx  == FAT_ERR)
-        {
-            fclose(fs); fclose(cpyf);
-            free(cwd); free(cluster_cont);
-            return CMD_NO_MEM;
-        }
         fat_file.FAT[idx] = FAT_EOF; //not to obtain it in next iter
         fat_cseek(&fat_file, fs, idx);
     }
     fclose(cpyf);
     free(cluster_cont);
+
     //fat_file.FAT[idx] = FAT_EOF;
 
     fat_cseek(&fat_file,fs, cwd->idx);
@@ -500,7 +538,7 @@ cmd_err_code_t cmd_incp(void *args)
     fclose(fs);
     free(cwd);
     fat_file.last_write = time(NULL);
-    return CMD_OK;
+    return idx == FAT_ERR? CMD_NO_MEM : CMD_OK;
 }
 
 cmd_err_code_t cmd_outcp(void *args)
@@ -563,34 +601,7 @@ cmd_err_code_t cmd_mv(void *args)
     trim_slash(to,i);
 
     fat_dir_t *dir = NULL;
-    if(traverse_to_parent(to, &to_name, &dir) != CMD_OK) // check to exists
-    {
-        return CMD_FILE_404;
-    }
-
-    for(i = 2; i<dir->fnum; i++) // "to" can either be a directory in its parent or not be there at all
-    {
-        if(!strncmp(to_name, dir->files[i].name, FILENAME_SIZE))
-        {
-            if(dir->files[i].type == FTYPE_FILE) // another file is there of the same name -> illegal
-            {
-                free(dir);
-                return CMD_EXIST;
-            }
-            else 
-            {
-                fat_goto_dir(&fat_file, dir, to_name); // is "to" is dir...
-                to_name = from_name; // ...just move to "to", not rename
-                break;
-            }
-        }
-    }
-
-    if(DIR_SIZE(dir->fnum+1) > BLOCK_SIZE) // check if the file can fit there
-    {
-        free(dir);
-        return CMD_NO_MEM;
-    }
+    if((i = cp_checks(to, &to_name, &dir)) != CMD_OK) return i;
     to_idx = dir->idx;
     free(dir);
 
@@ -598,6 +609,7 @@ cmd_err_code_t cmd_mv(void *args)
     {
         return CMD_PATH_404;
     }
+    if(!to_name) to_name = from_name; // if "to" is a directory, do not rename
 
     for(i=0;i<dir->fnum && strcmp(dir->files[i].name,from_name);i++);
     if(i>=dir->fnum) 
@@ -637,40 +649,8 @@ cmd_err_code_t cmd_cp(void *args)
     int i; 
     dblock_idx_t to_idx, from_idx;
 
-    i = strlen(from);
-    trim_slash(from,i);
-    i = strlen(to);
-    trim_slash(to,i);
-
     fat_dir_t *dir = NULL;
-    if(traverse_to_parent(to, &to_name, &dir) != CMD_OK) // check to exists
-    {
-        return CMD_FILE_404;
-    }
-
-    for(i = 2; i<dir->fnum; i++) // "to" can either be a directory in its parent or not be there at all
-    {
-        if(!strncmp(to_name, dir->files[i].name, FILENAME_SIZE))
-        {
-            if(dir->files[i].type == FTYPE_FILE) // another file is there of the same name -> illegal
-            {
-                free(dir);
-                return CMD_EXIST;
-            }
-            else 
-            {
-                fat_goto_dir(&fat_file, dir, to_name); // is "to" is dir...
-                to_name = from_name; // ...just cpy to "to", not rename
-                break;
-            }
-        }
-    }
-
-    if(DIR_SIZE(dir->fnum+1) > BLOCK_SIZE) // check if the file can fit there
-    {
-        free(dir);
-        return CMD_NO_MEM;
-    }
+    if((i = cp_checks(to, &to_name, &dir)) != CMD_OK) return i;
     to_idx = dir->idx;
 
     free(dir);
@@ -678,6 +658,7 @@ cmd_err_code_t cmd_cp(void *args)
     {
         return CMD_PATH_404;
     }
+    if(!to_name) to_name = from_name; // if "to" is a directory, do not rename
 
     for(i=0;i<dir->fnum && strcmp(dir->files[i].name,from_name);i++);
     if(i>=dir->fnum) 
@@ -720,6 +701,12 @@ cmd_err_code_t cmd_cp(void *args)
         from_idx = fat_file.FAT[from_idx];
 
         fat_file.FAT[idx] = fat_get_free_cluster(&fat_file);
+        if( fat_file.FAT[idx]  == FAT_ERR)
+        {
+            fat_file.FAT[idx] = FAT_EOF; // no memory -> truncate the file and return NO_MEM
+            idx = FAT_ERR;
+            break;
+        }
         idx = fat_file.FAT[idx];
         fat_file.FAT[idx] = FAT_EOF;
     }
@@ -737,10 +724,117 @@ cmd_err_code_t cmd_cp(void *args)
 
     fclose(fs);
     free(dir);
-    return CMD_OK;
+    return idx == FAT_ERR? CMD_NO_MEM : CMD_OK;
+}
+
+cmd_err_code_t cmd_info(void *args)
+{
+    char *inf =  ((char **)args)[0];
+    char *inf_name;
+    fat_dir_t *dir = NULL;
+    fat_file_info_t infof = {
+        .start = FAT_ERR
+    };
+
+    if(traverse_to_parent(inf, &inf_name, &dir) != CMD_OK) return CMD_FILE_404;
+    for(int i=0; i < dir->fnum; i++)
+    {
+        if(!strncmp(inf_name, dir->files[i].name,FILENAME_SIZE))
+        {
+            infof = dir->files[i];
+            break;
+        }
+    }
+    if(infof.start == FAT_ERR) return CMD_FILE_404;
+
+    printf("name\tsize\ttype\tclusters\n");
+    printf("%s\t%ld\t%4s\t", infof.name, infof.size, infof.type == FTYPE_DIR? "DIR" : "FILE");
+    for(dblock_idx_t i = infof.start; i != FAT_EOF && i<fat_file.data_blocks; i = fat_file.FAT[i])
+    {
+        printf("%d,",i);
+    }
+    printf("\n");
+
+    return FAT_OK;
 
 }
 
+cmd_err_code_t cmd_defrag(void *args)
+{
+    char *inf =  ((char **)args)[0];
+    char *inf_name;
+    fat_dir_t *dir = NULL;
+    fat_file_info_t infof = {
+        .start = FAT_ERR
+    };
+    int i;
+
+    if(traverse_to_parent(inf, &inf_name, &dir) != CMD_OK) return CMD_FILE_404;
+    for(i=0; i < dir->fnum; i++)
+    {
+        if(!strncmp(inf_name, dir->files[i].name,FILENAME_SIZE))
+        {
+            infof = dir->files[i];
+            break;
+        }
+    }
+    if(infof.start == FAT_ERR) return CMD_FILE_404;
+
+    dblock_idx_t s,e;
+    int dblocks = infof.size/BLOCK_SIZE + !!(infof.size%BLOCK_SIZE);
+    for(s = 0; s<fat_file.data_blocks && fat_file.FAT[s] != FAT_FREE; s++);
+    for(e=s; s < fat_file.data_blocks ; s=e+1, e=s)
+    {
+        while(fat_file.FAT[e] == FAT_FREE)
+        {
+             if(e+1 >= fat_file.data_blocks || e-s >= dblocks-1) goto find_free_end;
+             e++;
+        }
+    }
+    find_free_end:
+
+    printD("defrag: new_s=%d,new_e=%d,dblocks=%d",s,e,dblocks);
+
+    if(e-s >= dblocks)
+        e = s+dblocks-1;
+    else if (e-s < dblocks-1)
+    {
+        free(dir);
+        return CMD_NO_MEM;
+    } 
+
+    dblock_idx_t free_blocks[dblocks+1];
+    for(e=0;e<dblocks;e++) free_blocks[e] = s+e;
+    free_blocks[dblocks] = FAT_EOF;
+
+    FILE *fs = fat_copen(&fat_file,infof.start,CLUSTER_WRITE);
+    s = infof.start;
+    char *cluster_cont = malloc(BLOCK_SIZE*sizeof(char));
+
+    for(e=0; e < dblocks; e++)
+    {
+        bzero(cluster_cont, BLOCK_SIZE);
+        fat_cseek(&fat_file, fs, s);
+        fread(cluster_cont, 1, BLOCK_SIZE, fs);
+        fat_cseek(&fat_file, fs, free_blocks[e]);
+        fwrite(cluster_cont, 1, BLOCK_SIZE, fs);
+
+        fat_file.FAT[free_blocks[e]] = free_blocks[e+1];
+
+        infof.start = fat_file.FAT[s]; // infof won't be needed anymore, reuse it as temp
+        fat_file.FAT[s] = FAT_FREE;
+        s = infof.start;
+    }
+
+    infof.start = free_blocks[0];
+    fat_cseek(&fat_file, fs, dir->idx);
+    fseek(fs, DIR_SIZE(i),SEEK_CUR);
+    fwrite(&infof, FINFO_SIZE, 1, fs);
+
+    fclose(fs);
+    free(cluster_cont); free(dir);
+    return CMD_OK;
+}
 
 cmd_err_code_t cmd_lw(void *null)
 {
